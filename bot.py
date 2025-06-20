@@ -1,7 +1,4 @@
-﻿# bot.py
-
 import os
-import re
 import json
 import aiohttp
 import asyncio
@@ -12,7 +9,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 
 # ─── Umgebungsvariablen laden ────────────────────────────────────────────────────
-load_dotenv()  # .env einlesen
+load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
@@ -57,16 +54,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ─── Spracherkennung (Heuristik) ────────────────────────────────────────────────
-GERMAN_WORDS  = {" der"," die"," das"," und"," ist"," nicht"," ich"," mir"," dir"," ein"," eine"," mit"}
-ENGLISH_WORDS = {" the"," and"," is"," you"," for"," this"," that"," it"," are"," not"}
-
-def detect_language(text: str) -> str:
-    tl = text.lower()
-    if re.search(r"[äöüß]", tl):
-        return "de"
-    return "de" if sum(tl.count(w) for w in GERMAN_WORDS) >= sum(tl.count(w) for w in ENGLISH_WORDS) else "en"
-
 # ─── Google Gemini API-Aufruf ───────────────────────────────────────────────────
 async def call_gemini(prompt: str) -> str:
     payload = {
@@ -85,26 +72,6 @@ async def call_gemini(prompt: str) -> str:
         return "*Fehler bei Übersetzung*"
     parts = cands[0].get("content", {}).get("parts", [])
     return "".join(p.get("text","") for p in parts).strip()
-
-# ─── Basis-Prompts ───────────────────────────────────────────────────────────────
-BASE_PROMPT_DE_EN = (
-    "Übersetze den folgenden deutschen OnlyFans-Chat-Text exakt und nuanciert ins Englische. "
-    "Bewahre dabei den Tonfall einer jungen, koketten, selbstbewussten deutschen Frau. "
-    "Verwende authentischen Slang, Abkürzungen, Chat-Sprache. KEINE Emojis. "
-    "Es soll spontan, emotional und natürlich klingen, nicht KI-generiert. "
-    "Finde echte englische Äquivalente für kulturelle Referenzen oder Ausdrücke. "
-    "Keine zusätzlichen Satzzeichen am Ende, außer im Original. "
-    "Antworte NUR mit der Übersetzung und nichts anderem:"
-)
-BASE_PROMPT_EN_DE = (
-    "Übersetze den folgenden englischen OnlyFans-Chat-Text exakt und nuanciert ins Deutsche. "
-    "Bewahre dabei den Tonfall einer jungen, koketten, selbstbewussten deutschen Frau. "
-    "Verwende authentischen Slang, Abkürzungen, Chat-Sprache. KEINE Emojis. "
-    "Es soll spontan, emotional und natürlich klingen, nicht KI-generiert. "
-    "Finde echte deutsche Äquivalente für kulturelle Referenzen oder Ausdrücke. "
-    "Keine zusätzlichen Satzzeichen am Ende, außer im Original. "
-    "Antworte NUR mit der Übersetzung und nichts anderem:"
-)
 
 # ─── Menü mit Dropdown ───────────────────────────────────────────────────────────
 def make_translation_menu():
@@ -207,13 +174,18 @@ async def on_message(message: discord.Message):
     if not txt:
         return
 
-    lang = detect_language(txt)
-    if lang == "de":
-        prompt = f"{BASE_PROMPT_DE_EN}\nStil: {info[2]}\n{txt}"
-        footer = "Deutsch → Englisch"
-    else:
-        prompt = f"{BASE_PROMPT_EN_DE}\nStil: {info[2]}\n{txt}"
-        footer = "Englisch → Deutsch"
+    # --- Neuer Prompt: Gemini entscheidet Sprache selbst ---
+    prompt = (
+        f"Erkenne die Sprache des folgenden OnlyFans-Chat-Textes. "
+        f"Wenn es Deutsch ist, übersetze ihn nuanciert ins Englische im Stil: {info[2]}. "
+        f"Wenn es Englisch ist, übersetze ihn nuanciert ins Deutsche im Stil: {info[2]}. "
+        "Verwende authentischen Slang, Chat-Sprache, keine Emojis. "
+        "Es soll spontan, emotional und natürlich klingen, nicht KI-generiert. "
+        "Finde echte Äquivalente für kulturelle Referenzen. "
+        "Antworte NUR mit der Übersetzung und nichts anderem:\n"
+        f"{txt}"
+    )
+    footer = "Auto-Detected Translation"
 
     try:
         translation = await asyncio.wait_for(call_gemini(prompt), timeout=20)
