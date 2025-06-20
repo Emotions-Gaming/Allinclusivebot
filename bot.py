@@ -11,7 +11,7 @@ from discord import app_commands
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GUILD_ID = int(os.getenv("GUILD_ID") or "1374724357741609041")   # dev/test server-id
+GUILD_ID = int(os.getenv("GUILD_ID") or "1249813174731931740")   # dev/test server-id
 
 MODEL_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
@@ -394,6 +394,8 @@ async def strikeaddroleremove(interaction: discord.Interaction):
 
 @bot.tree.command(name="strikemainmenu", description="Postet das Strike-Menü im aktuellen Channel", guild=discord.Object(id=GUILD_ID))
 async def strikemainmenu(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     embed, view = make_strikemain_menu(interaction.guild)
     await interaction.channel.send(embed=embed, view=view)
     await interaction.response.send_message("Strike-Menü gepostet.", ephemeral=True)
@@ -806,7 +808,7 @@ async def wiki_delete(interaction: discord.Interaction):
 # SCHICHTSYSTEM: Schichtübergabe ohne Button – nur Hinweis zum Command
 
 SCHICHT_CONFIG_FILE = "schicht_config.json"
-GUILD_ID = 1374724357741609041
+GUILD_ID = 1249813174731931740
 
 def load_schicht_config():
     return load_json(SCHICHT_CONFIG_FILE, {
