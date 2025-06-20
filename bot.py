@@ -117,14 +117,6 @@ async def start_session(interaction: discord.Interaction, prof: str):
     cat = bot.get_channel(trans_cat_id) if trans_cat_id else None
     if not cat or cat.type != discord.ChannelType.category:
         cat = None
-    if not cat:
-        cat = None
-        for category in guild.categories:
-            if any("translat" in c.name for c in category.text_channels):
-                cat = category
-                break
-        if not cat:
-            cat = None
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
@@ -132,7 +124,8 @@ async def start_session(interaction: discord.Interaction, prof: str):
     }
     chan_name = f"translat-{prof.lower()}-{user.display_name.lower()}".replace(" ", "-")
     old = None
-    for c in (cat.text_channels if cat else guild.text_channels):
+    channels = cat.text_channels if cat else guild.text_channels
+    for c in channels:
         if c.name == chan_name:
             old = c
             break
@@ -298,110 +291,130 @@ async def translatpromptdelete(interaction: discord.Interaction):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     save_json(PROMPT_FILE, {"addition": ""})
     await interaction.response.send_message("Prompt-Erweiterung entfernt.", ephemeral=True)
+import datetime
 
+STRIKE_FILE        = "strike_data.json"
+STRIKE_LIST_FILE   = "strike_list.json"
+STRIKE_ROLES_FILE  = "strike_roles.json"
+STRIKE_PUNISH_ROLE_FILE = "strike_punishrole.json"
 
-# ====== STRIKE SYSTEM BEGINNT HIER ======
-def load_strikes():
-    return load_json(STRIKE_FILE, {})
+def load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except:
+        return default
 
-def save_strikes(data):
-    save_json(STRIKE_FILE, data)
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-def save_strike_roles(role_ids):
-    save_json(STRIKE_ROLES_FILE, {"role_ids": list(role_ids)})
+# ---- Data Loader
+strike_data         = load_json(STRIKE_FILE, {})
+strike_list_cfg     = load_json(STRIKE_LIST_FILE, {})
+strike_list_channel_id = strike_list_cfg.get("channel_id")
+strike_roles_cfg    = load_json(STRIKE_ROLES_FILE, {})
+strike_roles        = set(strike_roles_cfg.get("role_ids", []))
+punish_role_cfg     = load_json(STRIKE_PUNISH_ROLE_FILE, {})
+punish_role_id      = punish_role_cfg.get("role_id")
 
-def save_strike_list_cfg(data):
-    save_json(STRIKE_LIST_FILE, data)
-
-def save_strike_reward(role_id):
-    save_json(STRIKE_REWARD_FILE, {"role_id": role_id})
+def has_strike_role(user):
+    return any(r.id in strike_roles for r in user.roles) or user.guild_permissions.administrator
 
 async def get_guild_members(guild):
     return [m for m in guild.members if not m.bot]
 
-# ====== STRIKE SYSTEM ======
-
-# Strike-Berechtigte Rolle hinzufügen/entfernen
-@bot.tree.command(name="strikerole", description="Fügt eine Rolle zu Strike-Berechtigten hinzu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikerole(interaction: discord.Interaction, role: discord.Role):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global strike_roles
-    strike_roles.add(role.id)
-    save_strike_roles(strike_roles)
-    await interaction.response.send_message(f"Rolle **{role.name}** ist jetzt Strike-Berechtigt.", ephemeral=True)
-
-@bot.tree.command(name="strikeroleremove", description="Entfernt eine Rolle aus Strike-Berechtigten", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikeroleremove(interaction: discord.Interaction, role: discord.Role):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global strike_roles
-    if role.id in strike_roles:
-        strike_roles.remove(role.id)
-        save_strike_roles(strike_roles)
-        await interaction.response.send_message(f"Rolle **{role.name}** entfernt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
-
-@bot.tree.command(name="strikeaddrole", description="Setzt die Belohnungsrolle für 3 Strikes", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikeaddrole(interaction: discord.Interaction, role: discord.Role):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global strike_reward_role_id
-    strike_reward_role_id = role.id
-    save_strike_reward(role.id)
-    await interaction.response.send_message(f"Rolle **{role.name}** wird nun bei 3 Strikes automatisch vergeben.", ephemeral=True)
-
-@bot.tree.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht", guild=discord.Object(id=GUILD_ID))
+# ------ /strikelist setzen
+@bot.tree.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht")
 @app_commands.describe(channel="Channel für Strikes")
 async def strikelist(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not owner_or_admin_check(interaction):
+    if not has_strike_role(interaction.user):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     global strike_list_channel_id
     strike_list_channel_id = channel.id
-    save_strike_list_cfg({"channel_id": channel.id})
+    save_json(STRIKE_LIST_FILE, {"channel_id": channel.id})
     await interaction.response.send_message(f"Strike-Übersicht wird jetzt hier gepostet: {channel.mention}", ephemeral=True)
     await update_strike_list()
 
-# STRIKEMAIN: Dropdown für Strikes, immer im Channel, reset nach Auswahl
-@bot.tree.command(name="strikemain", description="Strike-Menü im Channel posten", guild=discord.Object(id=GUILD_ID))
+# ----- Strike-Berechtigungsrollen hinzufügen/entfernen
+@bot.tree.command(name="strikerole", description="Fügt eine Rolle zu Strike-Berechtigten hinzu")
+@app_commands.describe(role="Discord Rolle")
+async def strikerole(interaction: discord.Interaction, role: discord.Role):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Nur Admins können Rollen festlegen.", ephemeral=True)
+    global strike_roles
+    strike_roles.add(role.id)
+    save_json(STRIKE_ROLES_FILE, {"role_ids": list(strike_roles)})
+    await interaction.response.send_message(f"Rolle **{role.name}** ist jetzt Strike-Berechtigt.", ephemeral=True)
+
+@bot.tree.command(name="strikeroleremove", description="Entfernt eine Rolle von den Strike-Berechtigten")
+@app_commands.describe(role="Discord Rolle")
+async def strikeroleremove(interaction: discord.Interaction, role: discord.Role):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Nur Admins können Rollen festlegen.", ephemeral=True)
+    global strike_roles
+    if role.id in strike_roles:
+        strike_roles.remove(role.id)
+        save_json(STRIKE_ROLES_FILE, {"role_ids": list(strike_roles)})
+        await interaction.response.send_message(f"Rolle **{role.name}** ist **nicht mehr** Strike-Berechtigt.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
+
+@bot.tree.command(name="strikeaddrole", description="Setzt eine Rolle, die beim 3. Strike automatisch vergeben wird")
+@app_commands.describe(role="Discord Rolle")
+async def strikeaddrole(interaction: discord.Interaction, role: discord.Role):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Nur Admins können Rollen festlegen.", ephemeral=True)
+    global punish_role_id
+    punish_role_id = role.id
+    save_json(STRIKE_PUNISH_ROLE_FILE, {"role_id": role.id})
+    await interaction.response.send_message(f"Rolle **{role.name}** wird beim 3. Strike vergeben.", ephemeral=True)
+
+@bot.tree.command(name="strikeaddroleremove", description="Entfernt die automatische 3. Strike-Rolle")
+async def strikeaddroleremove(interaction: discord.Interaction):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Nur Admins können Rollen entfernen.", ephemeral=True)
+    global punish_role_id
+    punish_role_id = None
+    save_json(STRIKE_PUNISH_ROLE_FILE, {"role_id": None})
+    await interaction.response.send_message(f"Die automatische Strike-Rolle wurde entfernt.", ephemeral=True)
+
+# --- STRIKEMAIN mit Dropdown (sichtbar für alle, Strike vergeben nur für Berechtigte)
+@bot.tree.command(name="strikemain", description="Strike-Menü im Channel posten")
 async def strikemain(interaction: discord.Interaction):
     members = await get_guild_members(interaction.guild)
-    options = [discord.SelectOption(label="Keinen auswählen", value="none")]
-    for m in members:
-        options.append(discord.SelectOption(label=m.display_name, value=str(m.id)))
+    options = [discord.SelectOption(label="Keinen", value="none")] + [
+        discord.SelectOption(label=m.display_name, value=str(m.id)) for m in members
+    ]
     sel = discord.ui.Select(placeholder="User wählen", options=options, max_values=1)
     view = discord.ui.View(timeout=None)
     async def sel_cb(inter):
+        if inter.data["values"][0] == "none":
+            await inter.response.defer()
+            reset_embed, reset_view = make_strikemain_menu(interaction.guild)
+            await inter.message.edit(embed=reset_embed, view=reset_view)
+            return
         if not has_strike_role(inter.user):
             return await inter.response.send_message("Du hast keine Berechtigung für das Strike-System.", ephemeral=True)
-        sel.disabled = False  # Falls Discord irgendwann wieder locked dropdowns
-        uid_val = inter.data["values"][0]
-        if uid_val == "none":
-            # Reset dropdown, nichts tun
-            await inter.response.edit_message(view=make_strike_select_view(members))
-            return
-        uid = int(uid_val)
+        uid = int(inter.data["values"][0])
         modal = discord.ui.Modal(title="Strike vergeben")
         reason = discord.ui.TextInput(label="Grund", style=discord.TextStyle.long, required=True)
         imgurl = discord.ui.TextInput(label="Bild-Link (optional)", style=discord.TextStyle.short, required=False)
         modal.add_item(reason)
         modal.add_item(imgurl)
         async def on_submit(m_inter):
-            strikes = load_strikes()
+            strikes = load_json(STRIKE_FILE, {})
             entry = {
                 "reason": reason.value,
                 "image": imgurl.value,
                 "by": inter.user.display_name,
-                "timestamp": datetime.datetime.now().strftime('%d.%m.%Y %H:%M')
+                "timestamp": datetime.datetime.now().isoformat(timespec="seconds")
             }
             strikes.setdefault(str(uid), []).append(entry)
-            save_strikes(strikes)
+            save_json(STRIKE_FILE, strikes)
             strike_count = len(strikes[str(uid)])
-            # ---- DM je nach Anzahl ----
+            # ---- Strike DM je nach Anzahl ----
+            msg = None
             if strike_count == 1:
                 msg = (
                     f"Du hast einen **Strike** bekommen wegen:\n```{reason.value}```"
@@ -415,7 +428,7 @@ async def strikemain(interaction: discord.Interaction):
                     f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
                     "\nMeld dich bei einem Teamlead um darüber zu sprechen!"
                 )
-            else:
+            elif strike_count == 3:
                 msg = (
                     f"Es ist soweit... du hast deinen **3ten Strike** gesammelt...\n"
                     f"```{reason.value}```"
@@ -427,35 +440,58 @@ async def strikemain(interaction: discord.Interaction):
                 user = interaction.guild.get_member(uid)
                 if user:
                     await user.send(msg)
-                    # Auto Rolle bei 3 Strikes
-                    if strike_count == 3 and strike_reward_role_id:
-                        role = interaction.guild.get_role(strike_reward_role_id)
-                        if role:
-                            await user.add_roles(role, reason="3 Strikes erreicht")
+                    # Rolle geben wenn definiert
+                    if strike_count == 3 and punish_role_id:
+                        punish_role = interaction.guild.get_role(punish_role_id)
+                        if punish_role:
+                            await user.add_roles(punish_role, reason="3. Strike erreicht")
             except Exception:
                 pass
             await m_inter.response.send_message(f"Strike für <@{uid}> gespeichert!", ephemeral=True)
             await update_strike_list()
         modal.on_submit = on_submit
         await inter.response.send_modal(modal)
+        # Reset Dropdown damit wiederholt möglich
+        reset_embed, reset_view = make_strikemain_menu(interaction.guild)
+        await inter.message.edit(embed=reset_embed, view=reset_view)
     sel.callback = sel_cb
     view.add_item(sel)
-    await interaction.channel.send("Wähle einen User für einen Strike:", view=view)
+    embed = discord.Embed(
+        title="🚨 Strike System",
+        description="Wähle einen User für einen Strike:",
+        color=discord.Color.red()
+    )
+    return embed, view
 
-def make_strike_select_view(members):
-    options = [discord.SelectOption(label="Keinen auswählen", value="none")]
-    for m in members:
-        options.append(discord.SelectOption(label=m.display_name, value=str(m.id)))
+@bot.tree.command(name="strikemainmenu", description="Postet das Strike Menü im aktuellen Channel")
+async def strikemainmenu(interaction: discord.Interaction):
+    embed, view = make_strikemain_menu(interaction.guild)
+    await interaction.channel.send(embed=embed, view=view)
+    await interaction.response.send_message("Strike-Menü gepostet.", ephemeral=True)
+
+def make_strikemain_menu(guild):
+    members = [m for m in guild.members if not m.bot]
+    options = [discord.SelectOption(label="Keinen", value="none")] + [
+        discord.SelectOption(label=m.display_name, value=str(m.id)) for m in members
+    ]
     sel = discord.ui.Select(placeholder="User wählen", options=options, max_values=1)
     view = discord.ui.View(timeout=None)
-    view.add_item(sel)
     async def sel_cb(inter):
-        # gleiche callback wie oben
-        await strikemain(inter)
+        if inter.data["values"][0] == "none":
+            await inter.response.defer()
+            reset_embed, reset_view = make_strikemain_menu(guild)
+            await inter.message.edit(embed=reset_embed, view=reset_view)
+            return
     sel.callback = sel_cb
-    return view
+    view.add_item(sel)
+    embed = discord.Embed(
+        title="🚨 Strike System",
+        description="Wähle einen User für einen Strike:",
+        color=discord.Color.red()
+    )
+    return embed, view
 
-# STRIKELIST mit Buttons für Details
+# --- STRIKELIST (schönes Design, Buttons, Private-Infos) ---
 async def update_strike_list():
     global strike_list_channel_id
     if not strike_list_channel_id:
@@ -463,57 +499,56 @@ async def update_strike_list():
     ch = bot.get_channel(strike_list_channel_id)
     if not ch:
         return
-    strikes = load_strikes()
+    strikes = load_json(STRIKE_FILE, {})
     async for msg in ch.history(limit=100):
         if msg.author == bot.user:
             await msg.delete()
-    # Liste bauen
     if not strikes:
         await ch.send("⚡️ Aktuell keine Strikes.")
         return
-    await ch.send("__**Strikeliste**__")
+    await ch.send("**Strikeliste**\n-----------------")
     for uid, strike_list in strikes.items():
         if not strike_list:
             continue
         user = ch.guild.get_member(int(uid))
         uname = user.mention if user else f"<@{uid}>"
         n = len(strike_list)
-        btn = discord.ui.Button(label=f"Strikes: {n}", style=discord.ButtonStyle.primary)
+        btn = discord.ui.Button(label=f"{'X'*n}", style=discord.ButtonStyle.primary)
         async def btn_cb(inter, uid=uid, uname=uname):
-            strikes = load_strikes()
+            strikes = load_json(STRIKE_FILE, {})
             entrys = strikes.get(uid, [])
             lines = []
             for i, entry in enumerate(entrys, 1):
-                s = f"**{i}.** {entry['reason']} {f'| {entry['image']}' if entry['image'] else ''}"
+                s = f"{i}. {entry['reason']} | {entry['image']}" if entry['image'] else f"{i}. {entry['reason']}"
                 lines.append(s)
             msg_txt = f"{uname} hat folgende Strikes =>\n" + "\n".join(lines)
             await inter.response.send_message(msg_txt, ephemeral=True)
         btn.callback = btn_cb
         v = discord.ui.View(timeout=None)
         v.add_item(btn)
-        await ch.send(f"{uname}\n", view=v)
+        await ch.send(f"{uname}", view=v)
         await ch.send("-----------------")
 
-@bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen")
 @app_commands.describe(user="User zum Löschen")
 async def strikedelete(interaction: discord.Interaction, user: discord.Member):
     if not has_strike_role(interaction.user):
         return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
-    strikes = load_strikes()
+    strikes = load_json(STRIKE_FILE, {})
     if str(user.id) in strikes:
         strikes.pop(str(user.id))
-        save_strikes(strikes)
+        save_json(STRIKE_FILE, strikes)
         await update_strike_list()
         await interaction.response.send_message(f"Alle Strikes für {user.mention} entfernt.", ephemeral=True)
     else:
         await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
 
-@bot.tree.command(name="strikeremove", description="Entfernt einen Strike", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikeremove", description="Entfernt einen Strike")
 @app_commands.describe(user="User für Strike-Abbau")
 async def strikeremove(interaction: discord.Interaction, user: discord.Member):
     if not has_strike_role(interaction.user):
         return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
-    strikes = load_strikes()
+    strikes = load_json(STRIKE_FILE, {})
     entrys = strikes.get(str(user.id), [])
     if entrys:
         entrys.pop()
@@ -521,25 +556,23 @@ async def strikeremove(interaction: discord.Interaction, user: discord.Member):
             strikes.pop(str(user.id))
         else:
             strikes[str(user.id)] = entrys
-        save_strikes(strikes)
+        save_json(STRIKE_FILE, strikes)
         await update_strike_list()
         await interaction.response.send_message(f"Ein Strike für {user.mention} entfernt.", ephemeral=True)
     else:
         await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
 
-@bot.tree.command(name="strikeview", description="Zeigt dir, wie viele Strikes du hast (nur für dich selbst)", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikeview", description="Zeigt dir, wie viele Strikes du hast (nur für dich selbst).")
 async def strikeview(interaction: discord.Interaction):
-    strikes = load_strikes()
+    strikes = load_json(STRIKE_FILE, {})
     user_id = str(interaction.user.id)
     count = len(strikes.get(user_id, []))
-    if count == 0:
-        txt = f"✅ Du hast aktuell **keine Strikes**."
-    else:
-        txt = f"👮‍♂️ Du hast aktuell **{count} Strike{'s' if count!=1 else ''}**.\nBitte halte dich an die Regeln, sonst folgen Maßnahmen!"
-    await interaction.response.send_message(txt, ephemeral=True)
-
-# ============ WIKI-SYSTEM ============
-
+    msg = (
+        f"👮‍♂️ **Strike-Übersicht** für {interaction.user.mention}:\n\n"
+        f"Du hast aktuell **{count} Strike{'s' if count!=1 else ''}**.\n"
+        f"{'Wenn du mehr wissen willst, schreibe dem Bot einfach eine DM.' if count else 'Du hast aktuell keine Strikes.'}"
+    )
+    await interaction.response.send_message(msg, ephemeral=True)
 WIKI_PAGES_FILE = "wiki_pages.json"
 WIKI_MENU_FILE  = "wiki_menu.json"
 WIKI_BACKUP_FILE = "wiki_backup.json"
@@ -566,7 +599,7 @@ wiki_menu_cfg = load_wiki_menu()
 wiki_menu_channel_id = wiki_menu_cfg.get("channel_id")
 wiki_menu_message_id = wiki_menu_cfg.get("message_id")
 
-# -------- Hilfsfunktion für das Dropdown-Menü --------
+# -------- Dropdown-Menü bauen --------
 def make_wiki_menu_embed_and_view():
     pages = load_wiki_pages()
     embed = discord.Embed(
@@ -576,7 +609,7 @@ def make_wiki_menu_embed_and_view():
     )
     view = discord.ui.View(timeout=None)
     if not pages:
-        embed.add_field(name="(Keine Wiki-Seiten)", value="Erstelle zuerst Seiten mit `/wiki page`", inline=False)
+        embed.add_field(name="(Keine Wiki-Seiten)", value="Erstelle zuerst Seiten mit `/wiki_page`", inline=False)
         return embed, view
     options = [discord.SelectOption(label=title, value=title) for title in pages]
     sel = discord.ui.Select(placeholder="Seite wählen...", options=options, max_values=1)
@@ -589,13 +622,14 @@ def make_wiki_menu_embed_and_view():
             await inter.response.send_message("Check deine DMs! (Wenn keine ankommen: bitte DMs erlauben)", ephemeral=True)
         except:
             await inter.response.send_message("Konnte keine DM senden (evtl. deaktiviert)", ephemeral=True)
-        # Dropdown wieder resetten (ausgewählt->nichts)
-        await inter.message.edit(embed=embed, view=make_wiki_menu_embed_and_view())
+        # Dropdown wieder resetten
+        reset_embed, reset_view = make_wiki_menu_embed_and_view()
+        await inter.message.edit(embed=reset_embed, view=reset_view)
     sel.callback = sel_cb
     view.add_item(sel)
     return embed, view
 
-# --------- Wiki-Menü posten/aktualisieren ---------
+# -------- Menü aktualisieren --------
 async def update_wiki_menu():
     global wiki_menu_channel_id, wiki_menu_message_id
     if not (wiki_menu_channel_id and wiki_menu_message_id):
@@ -610,10 +644,10 @@ async def update_wiki_menu():
     except:
         pass
 
-# -------- /wikimain: Menü im Channel posten --------
-@bot.tree.command(name="wikimain", description="Postet das Wiki-Dropdown-Menü im aktuellen Channel", guild=discord.Object(id=GUILD_ID))
+# -------- /wikimain --------
+@bot.tree.command(name="wikimain", description="Postet das Wiki-Dropdown-Menü im aktuellen Channel")
 async def wikimain(interaction: discord.Interaction):
-    if not owner_or_admin_check(interaction):
+    if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     embed, view = make_wiki_menu_embed_and_view()
     msg = await interaction.channel.send(embed=embed, view=view)
@@ -623,17 +657,17 @@ async def wikimain(interaction: discord.Interaction):
     save_wiki_menu({"channel_id": wiki_menu_channel_id, "message_id": wiki_menu_message_id})
     await interaction.response.send_message("Wiki-Menü gepostet.", ephemeral=True)
 
-# -------- /wiki page: Diese Channelpage speichern --------
-@bot.tree.command(name="wiki_page", description="Legt den aktuellen Channel als Wiki-Seite an", guild=discord.Object(id=GUILD_ID))
+# -------- /wiki_page --------
+@bot.tree.command(name="wiki_page", description="Legt den aktuellen Channel als Wiki-Seite an")
 async def wiki_page(interaction: discord.Interaction):
-    if not owner_or_admin_check(interaction):
+    if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     channel = interaction.channel
-    # Sammle alle Nachrichten (Limit einstellbar)
+    # Sammle alle Nachrichten (ohne Bot)
     msgs = [m async for m in channel.history(limit=30, oldest_first=True) if not m.author.bot]
     text = "\n".join([f"{m.author.display_name}: {m.content}" for m in msgs if m.content.strip()])
     title = channel.name
-    # Backup alt speichern
+    # Backup speichern
     pages = load_wiki_pages()
     backup = load_wiki_backup()
     backup[title] = pages.get(title, "")
@@ -644,10 +678,10 @@ async def wiki_page(interaction: discord.Interaction):
     await interaction.response.send_message(f"Seite **{title}** gespeichert!", ephemeral=True)
     await update_wiki_menu()
 
-# -------- /wiki undo: Wiki-Pages aus Backup wiederherstellen --------
-@bot.tree.command(name="wiki_undo", description="Setzt die Wiki-Pages aus dem letzten Backup zurück", guild=discord.Object(id=GUILD_ID))
+# -------- /wiki_undo --------
+@bot.tree.command(name="wiki_undo", description="Setzt die Wiki-Pages aus dem letzten Backup zurück")
 async def wiki_undo(interaction: discord.Interaction):
-    if not owner_or_admin_check(interaction):
+    if not interaction.user.guild_permissions.administrator:
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     backup = load_wiki_backup()
     if not backup:
@@ -655,5 +689,3 @@ async def wiki_undo(interaction: discord.Interaction):
     save_wiki_pages(backup)
     await interaction.response.send_message("Backup wiederhergestellt!", ephemeral=True)
     await update_wiki_menu()
-
-bot.run(DISCORD_TOKEN)
