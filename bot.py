@@ -283,7 +283,6 @@ async def translationlog(interaction: discord.Interaction, channel: discord.Text
 
 # ─── STRIKE SYSTEM ──────────────────────────────────────────────────────────────
 
-# Hilfsfunktionen für Daten
 def load_strikes():
     return load_json(STRIKE_FILE, {})
 def save_strikes(data):
@@ -297,11 +296,9 @@ def load_strike_list_cfg():
 def save_strike_list_cfg(data):
     save_json(STRIKE_LIST_FILE, data)
 
-# ---- Guild Members ----
 async def get_guild_members(guild):
     return [m for m in guild.members if not m.bot]
 
-# ---- STRIKE LIST CHANNEL ----
 @bot.tree.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(channel="Channel für Strikes")
 async def strikelist(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -313,7 +310,6 @@ async def strikelist(interaction: discord.Interaction, channel: discord.TextChan
     await interaction.response.send_message(f"Strike-Übersicht wird jetzt hier gepostet: {channel.mention}", ephemeral=True)
     await update_strike_list()
 
-# ---- STRIKE ROLE MANAGEMENT ----
 @bot.tree.command(name="strikerole", description="Fügt eine Rolle zu den Strike-Berechtigten hinzu", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(role="Discord Rolle")
 async def strikerole(interaction: discord.Interaction, role: discord.Role):
@@ -337,16 +333,18 @@ async def strikeroleremove(interaction: discord.Interaction, role: discord.Role)
     else:
         await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
 
-# ---- STRIKE MAIN: Dropdown & Modal ----
+# -- STRIKEMAIN: Sichtbar für alle, Strike vergeben NUR für Berechtigte --
 @bot.tree.command(name="strikemain", description="Startet das Strike-Menü", guild=discord.Object(id=GUILD_ID))
 async def strikemain(interaction: discord.Interaction):
-    if not has_strike_role(interaction.user):
-        return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
+    # JEDER darf das Menü öffnen!
     members = await get_guild_members(interaction.guild)
     options = [discord.SelectOption(label=f"{m.display_name}", value=str(m.id)) for m in members]
     sel = discord.ui.Select(placeholder="User wählen", options=options, max_values=1)
     view = discord.ui.View(timeout=60)
     async def sel_cb(inter):
+        # Ab HIER Rechte-Check (Strike vergeben NUR für Berechtigte)!
+        if not has_strike_role(inter.user):
+            return await inter.response.send_message("Du hast keine Berechtigung für das Strike-System.", ephemeral=True)
         uid = int(inter.data["values"][0])
         modal = discord.ui.Modal(title="Strike vergeben")
         reason = discord.ui.TextInput(label="Grund", style=discord.TextStyle.long, required=True)
@@ -382,7 +380,6 @@ async def strikemain(interaction: discord.Interaction):
     view.add_item(sel)
     await interaction.response.send_message("Wähle einen User für einen Strike:", view=view, ephemeral=True)
 
-# ---- UPDATE STRIKE LIST ----
 async def update_strike_list():
     global strike_list_channel_id
     if not strike_list_channel_id:
@@ -423,7 +420,6 @@ async def update_strike_list():
         v.add_item(btn)
         await ch.send(f"{uname} [{user.display_name if user else ''}] => ", view=v)
 
-# ---- STRIKE DELETE ----
 @bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User zum Löschen")
 async def strikedelete(interaction: discord.Interaction, user: discord.Member):
@@ -438,7 +434,6 @@ async def strikedelete(interaction: discord.Interaction, user: discord.Member):
     else:
         await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
 
-# ---- STRIKE REMOVE ----
 @bot.tree.command(name="strikeremove", description="Entfernt einen Strike", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User für Strike-Abbau")
 async def strikeremove(interaction: discord.Interaction, user: discord.Member):
