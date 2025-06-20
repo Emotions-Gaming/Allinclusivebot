@@ -334,15 +334,13 @@ async def strikeroleremove(interaction: discord.Interaction, role: discord.Role)
         await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
 
 # -- STRIKEMAIN: Sichtbar für alle, Strike vergeben NUR für Berechtigte --
-@bot.tree.command(name="strikemain", description="Startet das Strike-Menü", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikemain", description="Strike-Menü im Channel posten", guild=discord.Object(id=GUILD_ID))
 async def strikemain(interaction: discord.Interaction):
-    # JEDER darf das Menü öffnen!
     members = await get_guild_members(interaction.guild)
     options = [discord.SelectOption(label=f"{m.display_name}", value=str(m.id)) for m in members]
     sel = discord.ui.Select(placeholder="User wählen", options=options, max_values=1)
-    view = discord.ui.View(timeout=60)
+    view = discord.ui.View(timeout=None)
     async def sel_cb(inter):
-        # Ab HIER Rechte-Check (Strike vergeben NUR für Berechtigte)!
         if not has_strike_role(inter.user):
             return await inter.response.send_message("Du hast keine Berechtigung für das Strike-System.", ephemeral=True)
         uid = int(inter.data["values"][0])
@@ -356,30 +354,49 @@ async def strikemain(interaction: discord.Interaction):
             entry = {
                 "reason": reason.value,
                 "image": imgurl.value,
-                "by": interaction.user.display_name,
+                "by": inter.user.display_name,
                 "timestamp": datetime.datetime.now().isoformat(timespec="seconds")
             }
             strikes.setdefault(str(uid), []).append(entry)
             save_strikes(strikes)
-            await m_inter.response.send_message(f"Strike für <@{uid}> gespeichert!", ephemeral=True)
+            strike_count = len(strikes[str(uid)])
+            # ---- Strike DM je nach Anzahl ----
+            if strike_count == 1:
+                msg = (
+                    f"Du hast einen **Strike** bekommen wegen:\n```{reason.value}```"
+                    f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
+                    "\nBitte melde dich bei einem Operation Lead!"
+                )
+            elif strike_count == 2:
+                msg = (
+                    f"Du hast jetzt schon deinen **2ten Strike** bekommen, schau dir die Regeln nochmal an.\n"
+                    f"Du hast ihn erhalten:\n```{reason.value}```"
+                    f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
+                    "\nMeld dich bei einem Teamlead um darüber zu sprechen!"
+                )
+            else:
+                msg = (
+                    f"Es ist soweit... du hast deinen **3ten Strike** gesammelt...\n"
+                    f"```{reason.value}```"
+                    f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
+                    "Jetzt muss leider eine Bestrafung folgen, darum melde dich schnellstmöglich bei einem TeamLead."
+                )
             # DM an User
             try:
                 user = interaction.guild.get_member(uid)
                 if user:
-                    msg = f"Du hast einen **Strike** bekommen wegen:\n```{reason.value}```"
-                    if imgurl.value:
-                        msg += f"\n\nBild: {imgurl.value}"
-                    msg += "\n\nBitte melde dich bei einem Operation Lead!"
                     await user.send(msg)
             except Exception as e:
                 pass
+            await m_inter.response.send_message(f"Strike für <@{uid}> gespeichert!", ephemeral=True)
             await update_strike_list()
         modal.on_submit = on_submit
         await inter.response.send_modal(modal)
     sel.callback = sel_cb
     view.add_item(sel)
-    await interaction.response.send_message("Wähle einen User für einen Strike:", view=view, ephemeral=True)
+    await interaction.channel.send("Wähle einen User für einen Strike:", view=view)
 
+# --- STRIKELIST CHANNEL FORMAT UND BUTTON CALLBACK ---
 async def update_strike_list():
     global strike_list_channel_id
     if not strike_list_channel_id:
@@ -394,6 +411,7 @@ async def update_strike_list():
     if not strikes:
         await ch.send("⚡️ Aktuell keine Strikes.")
         return
+    await ch.send("Strikeliste\n-----------------")
     for uid, strike_list in strikes.items():
         if not strike_list:
             continue
@@ -401,24 +419,20 @@ async def update_strike_list():
         uname = user.mention if user else f"<@{uid}>"
         n = len(strike_list)
         btn = discord.ui.Button(label=f"Strikes: {n}", style=discord.ButtonStyle.primary)
-        async def btn_cb(inter, uid=uid):
+        async def btn_cb(inter, uid=uid, uname=uname):
             strikes = load_strikes()
             entrys = strikes.get(uid, [])
-            txt = ""
+            lines = []
             for i, entry in enumerate(entrys, 1):
-                txt += f"**Strike {i}:** {entry['reason']}\n"
-                if entry.get("image"):
-                    txt += f"Bild: {entry['image']}\n"
-                txt += f"Von: {entry['by']} ({entry['timestamp']})\n---\n"
-            try:
-                await inter.user.send(f"Strikes von {uname}:\n{txt}")
-                await inter.response.send_message("Strike-Details wurden dir privat geschickt!", ephemeral=True)
-            except Exception as e:
-                await inter.response.send_message("Konnte dir keine DM schicken.", ephemeral=True)
+                s = f"{i}. {entry['reason']} | {entry['image']}" if entry['image'] else f"{i}. {entry['reason']}"
+                lines.append(s)
+            msg_txt = f"{uname} hat folgende Strikes =>\n" + "\n".join(lines)
+            await inter.response.send_message(msg_txt, ephemeral=True)
         btn.callback = btn_cb
         v = discord.ui.View(timeout=None)
         v.add_item(btn)
-        await ch.send(f"{uname} [{user.display_name if user else ''}] => ", view=v)
+        await ch.send(f"{uname}", view=v)
+        await ch.send("-----------------")
 
 @bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User zum Löschen")
