@@ -803,7 +803,10 @@ async def wiki_delete(interaction: discord.Interaction):
     view.add_item(sel)
     await interaction.response.send_message("Wähle eine Wiki-Seite zum **Löschen**:", view=view, ephemeral=True)
  
+# SCHICHTSYSTEM: Schichtübergabe mit Slash + Button + Rollenfilter
+
 SCHICHT_CONFIG_FILE = "schicht_config.json"
+GUILD_ID = 1374724357741609041  # oder DEINE andere ID, je nach Server
 
 def load_schicht_config():
     return load_json(SCHICHT_CONFIG_FILE, {
@@ -847,6 +850,8 @@ async def post_schicht_button():
                 url=f"discord://commands"
             ))
     await ch.send(embed=embed, view=GoButton())
+
+# ----------- Setup-Befehle (alle nur Admin) -----------
 
 @bot.tree.command(name="schichtwechsel", description="Setzt den Schichtwechsel-Textkanal", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(channel="Textkanal für Schichtübergabe")
@@ -896,7 +901,8 @@ async def schichtrollen_remove(interaction: discord.Interaction, role: discord.R
         save_schicht_config(schicht_cfg)
     await interaction.response.send_message(f"Rolle **{role.name}** wurde entfernt.", ephemeral=True)
 
-# --- USER AUTOCOMPLETE (jetzt async!)
+# ----------- Haupt-Command mit User-Autocomplete -----------
+
 async def schicht_autocomplete(interaction, current):
     guild = interaction.guild
     rollen = get_schichtrollen(guild)
@@ -959,10 +965,19 @@ async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
     except Exception:
         await interaction.followup.send(f"{member.mention} konnte nicht verschoben werden (Prüfe Rechte/DND/AFK).", ephemeral=True)
 
-# On ready: Button posten/updaten
+# ----------- On ready: Buttons & Commands synchronisieren -----------
+
 @bot.event
 async def on_ready():
-    # ...dein bestehendes on_ready...
+    try:
+        guild = bot.get_guild(GUILD_ID)
+        if guild:
+            await bot.tree.sync(guild=guild)
+            print(f"Slash-Commands für Guild {guild.name} synchronisiert!")
+        else:
+            await bot.tree.sync()
+    except Exception as e:
+        print("Sync-Error:", e)
     await post_schicht_button()
 
 
