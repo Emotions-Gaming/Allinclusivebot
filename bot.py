@@ -806,7 +806,7 @@ async def wiki_delete(interaction: discord.Interaction):
 # SCHICHTSYSTEM: Schichtübergabe mit Slash + Button + Rollenfilter
 
 SCHICHT_CONFIG_FILE = "schicht_config.json"
-GUILD_ID = 1374724357741609041  # oder DEINE andere ID, je nach Server
+GUILD_ID = 1374724357741609041  # oder DEINE andere ID
 
 def load_schicht_config():
     return load_json(SCHICHT_CONFIG_FILE, {
@@ -846,8 +846,7 @@ async def post_schicht_button():
             self.add_item(discord.ui.Button(
                 label="Schichtübergabe starten",
                 style=discord.ButtonStyle.success,
-                custom_id="schicht_start",
-                url=f"discord://commands"
+                url="discord://commands"  # Nur URL, KEIN custom_id!
             ))
     await ch.send(embed=embed, view=GoButton())
 
@@ -979,7 +978,6 @@ async def on_ready():
     except Exception as e:
         print("Sync-Error:", e)
     await post_schicht_button()
-
 
 # --- Script-Ende für diesen Part ---
 # NUR EINMAL GANZ UNTEN!
