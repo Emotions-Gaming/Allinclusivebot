@@ -802,6 +802,7 @@ async def wiki_delete(interaction: discord.Interaction):
     sel.callback = sel_cb
     view.add_item(sel)
     await interaction.response.send_message("Wähle eine Wiki-Seite zum **Löschen**:", view=view, ephemeral=True)
+ 
 SCHICHT_CONFIG_FILE = "schicht_config.json"
 
 def load_schicht_config():
@@ -828,7 +829,6 @@ async def post_schicht_button():
     ch = bot.get_channel(ch_id)
     if not ch:
         return
-    # Suche vorhandene Bot-Nachricht
     async for m in ch.history(limit=10):
         if m.author == bot.user and m.components:
             await m.delete()
@@ -837,7 +837,6 @@ async def post_schicht_button():
         description="Starte die Schichtübergabe mit dem Button unten –\nWähle dann den Nutzer aus, an den du übergeben willst.",
         color=discord.Color.purple()
     )
-    # Button, der den Slash-Command triggert
     class GoButton(discord.ui.View):
         def __init__(self):
             super().__init__(timeout=None)
@@ -845,11 +844,10 @@ async def post_schicht_button():
                 label="Schichtübergabe starten",
                 style=discord.ButtonStyle.success,
                 custom_id="schicht_start",
-                url=f"discord://commands"  # Öffnet den Command-Chooser (neuer Discord-Client)
+                url=f"discord://commands"
             ))
     await ch.send(embed=embed, view=GoButton())
 
-# SETUP BEFEHLE
 @bot.tree.command(name="schichtwechsel", description="Setzt den Schichtwechsel-Textkanal", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(channel="Textkanal für Schichtübergabe")
 async def schichtwechsel(interaction: discord.Interaction, channel: discord.TextChannel):
@@ -898,62 +896,13 @@ async def schichtrollen_remove(interaction: discord.Interaction, role: discord.R
         save_schicht_config(schicht_cfg)
     await interaction.response.send_message(f"Rolle **{role.name}** wurde entfernt.", ephemeral=True)
 
-# Slash-Command mit USER-AUTOCOMPLETE
-@bot.tree.command(name="schichtuebergabe", description="Starte die Schichtübergabe an einen Nutzer mit Rollen-Filter", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(nutzer="Nutzer für Übergabe")
-@app_commands.autocomplete(nutzer=lambda interaction, current: schicht_autocomplete(interaction, current))
-async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
-    # 1. Rechte prüfen
-    member = interaction.guild.get_member(int(nutzer))
-    anfragender = interaction.user
-    if not anfragender.voice or not anfragender.voice.channel:
-        return await interaction.response.send_message("❌ Du musst in einem Sprachkanal sein für Schichtwechsel.", ephemeral=True)
-    if not member:
-        return await interaction.response.send_message("❌ Nutzer nicht gefunden.", ephemeral=True)
-    # 2. Online?
-    if not member.status in [discord.Status.online, discord.Status.idle, discord.Status.dnd]:
-        try:
-            await member.send(f"{anfragender.mention} möchte Schicht übergeben! Bitte melde dich asap für den Schichtwechsel.")
-            await interaction.response.send_message(f"{member.mention} ist offline. Er wurde per DM benachrichtigt.", ephemeral=True)
-        except:
-            await interaction.response.send_message(f"{member.mention} ist offline und hat DMs deaktiviert. Bitte kontaktiere ihn manuell.", ephemeral=True)
-        return
-    # 3. Move 1: Anfragender -> VoiceMaster Eingang
-    guild = interaction.guild
-    voice_kanal = guild.get_channel(schicht_cfg["voice_channel_id"])
-    if not voice_kanal:
-        return await interaction.response.send_message("❌ VoiceMaster-Eingangskanal nicht gefunden!", ephemeral=True)
-    try:
-        await anfragender.move_to(voice_kanal)
-        await interaction.response.send_message("Du wurdest in den VoiceMaster-Eingang verschoben. Starte Schichtübergabe...", ephemeral=True)
-    except Exception as e:
-        return await interaction.response.send_message("❌ Verschieben fehlgeschlagen (Prüfe Rechte)!", ephemeral=True)
-    await asyncio.sleep(5)  # Zeit für VoiceMaster Bot
-    new_channel = anfragender.voice.channel if anfragender.voice else None
-    if not new_channel or new_channel.id == voice_kanal.id:
-        return await interaction.followup.send("❌ Temporärer Channel wurde nicht erkannt! Bitte manuell checken.", ephemeral=True)
-    try:
-        await member.move_to(new_channel)
-        await interaction.followup.send(f"{member.mention} wurde zu dir verschoben! Schichtübergabe läuft.", ephemeral=True)
-        # Log
-        log_id = schicht_cfg.get("log_channel_id")
-        if log_id:
-            log_ch = guild.get_channel(log_id)
-            if log_ch:
-                await log_ch.send(
-                    f"**Schichtwechsel**: {anfragender.mention} ➡️ {member.mention}\n"
-                    f"Channel: `{new_channel.name}`\nZeit: <t:{int(discord.utils.utcnow().timestamp())}:F>")
-    except Exception:
-        await interaction.followup.send(f"{member.mention} konnte nicht verschoben werden (Prüfe Rechte/DND/AFK).", ephemeral=True)
-
-# --- USER AUTOCOMPLETE
+# --- USER AUTOCOMPLETE (jetzt async!)
 async def schicht_autocomplete(interaction, current):
     guild = interaction.guild
     rollen = get_schichtrollen(guild)
     member_ids = set()
     for r in rollen:
         if r: member_ids.update([m.id for m in r.members])
-    # Wenn keine Rollen gewählt, alle Mitglieder ohne Bots
     if not member_ids:
         members = [m for m in guild.members if not m.bot]
     else:
@@ -967,9 +916,53 @@ async def schicht_autocomplete(interaction, current):
             break
     return filtered
 
+@bot.tree.command(name="schichtuebergabe", description="Starte die Schichtübergabe an einen Nutzer mit Rollen-Filter", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(nutzer="Nutzer für Übergabe")
+@app_commands.autocomplete(nutzer=schicht_autocomplete)
+async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
+    member = interaction.guild.get_member(int(nutzer))
+    anfragender = interaction.user
+    if not anfragender.voice or not anfragender.voice.channel:
+        return await interaction.response.send_message("❌ Du musst in einem Sprachkanal sein für Schichtwechsel.", ephemeral=True)
+    if not member:
+        return await interaction.response.send_message("❌ Nutzer nicht gefunden.", ephemeral=True)
+    if not member.status in [discord.Status.online, discord.Status.idle, discord.Status.dnd]:
+        try:
+            await member.send(f"{anfragender.mention} möchte Schicht übergeben! Bitte melde dich asap für den Schichtwechsel.")
+            await interaction.response.send_message(f"{member.mention} ist offline. Er wurde per DM benachrichtigt.", ephemeral=True)
+        except:
+            await interaction.response.send_message(f"{member.mention} ist offline und hat DMs deaktiviert. Bitte kontaktiere ihn manuell.", ephemeral=True)
+        return
+    guild = interaction.guild
+    voice_kanal = guild.get_channel(schicht_cfg["voice_channel_id"])
+    if not voice_kanal:
+        return await interaction.response.send_message("❌ VoiceMaster-Eingangskanal nicht gefunden!", ephemeral=True)
+    try:
+        await anfragender.move_to(voice_kanal)
+        await interaction.response.send_message("Du wurdest in den VoiceMaster-Eingang verschoben. Starte Schichtübergabe...", ephemeral=True)
+    except Exception as e:
+        return await interaction.response.send_message("❌ Verschieben fehlgeschlagen (Prüfe Rechte)!", ephemeral=True)
+    await asyncio.sleep(5)
+    new_channel = anfragender.voice.channel if anfragender.voice else None
+    if not new_channel or new_channel.id == voice_kanal.id:
+        return await interaction.followup.send("❌ Temporärer Channel wurde nicht erkannt! Bitte manuell checken.", ephemeral=True)
+    try:
+        await member.move_to(new_channel)
+        await interaction.followup.send(f"{member.mention} wurde zu dir verschoben! Schichtübergabe läuft.", ephemeral=True)
+        log_id = schicht_cfg.get("log_channel_id")
+        if log_id:
+            log_ch = guild.get_channel(log_id)
+            if log_ch:
+                await log_ch.send(
+                    f"**Schichtwechsel**: {anfragender.mention} ➡️ {member.mention}\n"
+                    f"Channel: `{new_channel.name}`\nZeit: <t:{int(discord.utils.utcnow().timestamp())}:F>")
+    except Exception:
+        await interaction.followup.send(f"{member.mention} konnte nicht verschoben werden (Prüfe Rechte/DND/AFK).", ephemeral=True)
+
 # On ready: Button posten/updaten
 @bot.event
 async def on_ready():
+    # ...dein bestehendes on_ready...
     await post_schicht_button()
 
 
