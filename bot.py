@@ -591,7 +591,7 @@ def make_wiki_menu_embed_and_view():
     pages = load_wiki_pages()
     embed = discord.Embed(
         title="📚 Space-Guide Wiki",
-        description="Wähle eine Seite aus, um den Infotext per privater Nachricht zu erhalten:",
+        description="Wähle eine Seite aus, um den Infotext **privat** hier angezeigt zu bekommen:",
         color=discord.Color.green()
     )
     view = discord.ui.View(timeout=None)
@@ -601,15 +601,13 @@ def make_wiki_menu_embed_and_view():
     options = [discord.SelectOption(label=title, value=title) for title in pages]
     sel = discord.ui.Select(placeholder="Seite wählen...", options=options, max_values=1)
     async def sel_cb(inter: discord.Interaction):
-        sel.disabled = False
         page = inter.data["values"][0]
         text = pages.get(page, "**Seite leer**")
-        try:
-            await inter.user.send(f"**{page}**\n{text}")
-            await inter.response.send_message("Check deine DMs! (Wenn keine ankommen: bitte DMs erlauben)", ephemeral=True)
-        except:
-            await inter.response.send_message("Konnte keine DM senden (evtl. deaktiviert)", ephemeral=True)
-        # Dropdown wieder resetten
+        # Privatnachricht als ephemeral Message im Main-Channel
+        await inter.response.send_message(
+            f"**{page}**\n{text}", ephemeral=True
+        )
+        # Dropdown resetten
         reset_embed, reset_view = make_wiki_menu_embed_and_view()
         await inter.message.edit(embed=reset_embed, view=reset_view)
     sel.callback = sel_cb
@@ -642,7 +640,7 @@ async def wikimain(interaction: discord.Interaction):
     save_wiki_menu({"channel_id": wiki_menu_channel_id, "message_id": wiki_menu_message_id})
     await interaction.response.send_message("Wiki-Menü gepostet.", ephemeral=True)
 
-@bot.tree.command(name="wiki_page", description="Legt den aktuellen Channel als Wiki-Seite an", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="wiki_page", description="Legt den aktuellen Channel als Wiki-Seite an und löscht ihn dann", guild=discord.Object(id=GUILD_ID))
 async def wiki_page(interaction: discord.Interaction):
     if not is_admin(interaction.user):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
@@ -658,8 +656,14 @@ async def wiki_page(interaction: discord.Interaction):
     # Jetzt speichern
     pages[title] = text if text else "(keine Nachrichten gefunden)"
     save_wiki_pages(pages)
-    await interaction.response.send_message(f"Seite **{title}** gespeichert!", ephemeral=True)
+    await interaction.response.send_message(f"Seite **{title}** gespeichert und Channel wird gelöscht!", ephemeral=True)
     await update_wiki_menu()
+    await asyncio.sleep(2)
+    # Channel löschen
+    try:
+        await channel.delete(reason="Als Wiki-Seite gespeichert.")
+    except Exception:
+        pass
 
 @bot.tree.command(name="wiki_undo", description="Setzt die Wiki-Pages aus dem letzten Backup zurück", guild=discord.Object(id=GUILD_ID))
 async def wiki_undo(interaction: discord.Interaction):
@@ -671,6 +675,7 @@ async def wiki_undo(interaction: discord.Interaction):
     save_wiki_pages(backup)
     await interaction.response.send_message("Backup wiederhergestellt!", ephemeral=True)
     await update_wiki_menu()
+
 
 # --- Script-Ende für diesen Part ---
 # NUR EINMAL GANZ UNTEN!
