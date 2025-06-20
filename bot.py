@@ -803,10 +803,10 @@ async def wiki_delete(interaction: discord.Interaction):
     view.add_item(sel)
     await interaction.response.send_message("Wähle eine Wiki-Seite zum **Löschen**:", view=view, ephemeral=True)
  
-# SCHICHTSYSTEM: Schichtübergabe mit Slash + Button + Rollenfilter
+# SCHICHTSYSTEM: Schichtübergabe ohne Button – nur Hinweis zum Command
 
 SCHICHT_CONFIG_FILE = "schicht_config.json"
-GUILD_ID = 1374724357741609041  # oder DEINE andere ID
+GUILD_ID = 1374724357741609041
 
 def load_schicht_config():
     return load_json(SCHICHT_CONFIG_FILE, {
@@ -824,8 +824,7 @@ schicht_cfg = load_schicht_config()
 def get_schichtrollen(guild):
     return [guild.get_role(rid) for rid in schicht_cfg.get("rollen", []) if guild.get_role(rid)]
 
-# Button im Channel posten
-async def post_schicht_button():
+async def post_schicht_message():
     ch_id = schicht_cfg.get("wechsel_channel_id")
     if not ch_id:
         return
@@ -833,22 +832,23 @@ async def post_schicht_button():
     if not ch:
         return
     async for m in ch.history(limit=10):
-        if m.author == bot.user and m.components:
+        if m.author == bot.user and (m.embeds or m.components):
             await m.delete()
     embed = discord.Embed(
         title="🕒 Schichtübergabe starten",
-        description="Starte die Schichtübergabe mit dem Button unten –\nWähle dann den Nutzer aus, an den du übergeben willst.",
+        description=(
+            "**So funktioniert es:**\n"
+            "• Tippe `/schichtuebergabe` in den Chat\n"
+            "• Wähle den gewünschten Nutzer (mit passender Rolle!) aus der Liste\n"
+            "• Fertig! Die Schichtübergabe läuft automatisch ab.\n\n"
+            "**Der Befehl:**\n"
+            "`/schichtuebergabe nutzer:<name>`\n\n"
+            "> Der Nutzer muss aktuell online sein und eine erlaubte Rolle haben.\n"
+            "> Du musst dich in einem Sprachkanal befinden."
+        ),
         color=discord.Color.purple()
     )
-    class GoButton(discord.ui.View):
-        def __init__(self):
-            super().__init__(timeout=None)
-            self.add_item(discord.ui.Button(
-                label="Schichtübergabe starten",
-                style=discord.ButtonStyle.success,
-                url="discord://commands"  # Nur URL, KEIN custom_id!
-            ))
-    await ch.send(embed=embed, view=GoButton())
+    await ch.send(embed=embed)
 
 # ----------- Setup-Befehle (alle nur Admin) -----------
 
@@ -859,7 +859,7 @@ async def schichtwechsel(interaction: discord.Interaction, channel: discord.Text
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     schicht_cfg["wechsel_channel_id"] = channel.id
     save_schicht_config(schicht_cfg)
-    await post_schicht_button()
+    await post_schicht_message()
     await interaction.response.send_message(f"Schichtwechsel-Kanal gesetzt: {channel.mention}", ephemeral=True)
 
 @bot.tree.command(name="schicht_voiceid", description="Setzt den VoiceMaster-Eingangskanal", guild=discord.Object(id=GUILD_ID))
@@ -964,7 +964,7 @@ async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
     except Exception:
         await interaction.followup.send(f"{member.mention} konnte nicht verschoben werden (Prüfe Rechte/DND/AFK).", ephemeral=True)
 
-# ----------- On ready: Buttons & Commands synchronisieren -----------
+# ----------- On ready: Message & Commands synchronisieren -----------
 
 @bot.event
 async def on_ready():
@@ -977,7 +977,8 @@ async def on_ready():
             await bot.tree.sync()
     except Exception as e:
         print("Sync-Error:", e)
-    await post_schicht_button()
+    await post_schicht_message()
+
 
 # --- Script-Ende für diesen Part ---
 # NUR EINMAL GANZ UNTEN!
