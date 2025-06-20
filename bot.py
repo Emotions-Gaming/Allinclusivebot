@@ -587,6 +587,20 @@ wiki_menu_cfg = load_wiki_menu()
 wiki_menu_channel_id = wiki_menu_cfg.get("channel_id")
 wiki_menu_message_id = wiki_menu_cfg.get("message_id")
 
+def split_long_text(text, prefix=""):
+    maxlen = 2000 - len(prefix)
+    parts = []
+    while text:
+        chunk = text[:maxlen]
+        # Nach Zeilenumbruch splitten, damit keine Wörter zerstört werden
+        if len(chunk) == maxlen and "\n" in chunk:
+            last_n = chunk.rfind("\n")
+            if last_n > 0:
+                chunk = chunk[:last_n]
+        parts.append(chunk)
+        text = text[len(chunk):]
+    return parts
+
 def make_wiki_menu_embed_and_view():
     pages = load_wiki_pages()
     embed = discord.Embed(
@@ -603,7 +617,13 @@ def make_wiki_menu_embed_and_view():
     async def sel_cb(inter: discord.Interaction):
         page = inter.data["values"][0]
         text = pages.get(page, "**Seite leer**")
-        await inter.response.send_message(f"**{page}**\n{text}", ephemeral=True)
+        # Text splitten falls zu lang
+        parts = split_long_text(text)
+        total = len(parts)
+        for i, chunk in enumerate(parts):
+            prefix = f"**{page}**\n" if i == 0 else ""
+            head = f"**Seitenauszug [{i+1}/{total}]**\n" if total > 1 else ""
+            await inter.response.send_message(f"{prefix}{head}{chunk}", ephemeral=True)
         # Menü zurücksetzen
         reset_embed, reset_view = make_wiki_menu_embed_and_view()
         await inter.message.edit(embed=reset_embed, view=reset_view)
@@ -669,7 +689,7 @@ async def wiki_undo(interaction: discord.Interaction):
     if not backup:
         return await interaction.response.send_message("Kein Backup vorhanden.", ephemeral=True)
     save_wiki_pages(backup)
-    await interaction.response.send_message("Backup wiederhergestellt!", ephemeral=True)
+    await interaction.response.send_message("Backup wiederhergestellt (nur Daten, keine Channels)!", ephemeral=True)
     await update_wiki_menu()
 
 @bot.tree.command(name="wiki_edit", description="Bearbeite eine Wiki-Seite per Dropdown", guild=discord.Object(id=GUILD_ID))
@@ -702,7 +722,6 @@ async def wiki_edit(interaction: discord.Interaction):
             return msg.channel == ch and msg.author == inter.user and not msg.author.bot
         try:
             msg = await bot.wait_for('message', timeout=300, check=check)
-            # Button zum Übernehmen
             button = discord.ui.Button(label="Speichern & Schließen", style=discord.ButtonStyle.success)
             async def btn_cb(button_inter):
                 pages2 = load_wiki_pages()
@@ -752,7 +771,6 @@ async def wiki_delete(interaction: discord.Interaction):
     sel.callback = sel_cb
     view.add_item(sel)
     await interaction.response.send_message("Wähle eine Wiki-Seite zum **Löschen**:", view=view, ephemeral=True)
-
 
 # --- Script-Ende für diesen Part ---
 # NUR EINMAL GANZ UNTEN!
