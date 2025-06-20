@@ -1,488 +1,430 @@
-import os
-import json
-import aiohttp
-import asyncio
-import datetime
-
+from __future__ import annotations
 import discord
 from discord.ext import commands
 from discord import app_commands
 from dotenv import load_dotenv
+import os
+import json
+import re
+import secrets
 
-# ─── Umgebungsvariablen laden ────────────────────────────────────────────────────
+# Load environment variables from .env
 load_dotenv()
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+TOKEN = os.getenv("DISCORD_TOKEN")
+TEST_GUILD_ID = os.getenv("GUILD_ID")
 
-if not DISCORD_TOKEN or not GOOGLE_API_KEY:
-    print("⚠️ Bitte setze DISCORD_TOKEN und GOOGLE_API_KEY in der .env-Datei.")
-    exit(1)
+# Data file paths
+TRANS_FILE = "translation_data.json"
+STRIKE_FILE = "strike_data.json"
+WIKI_CONFIG_FILE = "wiki_config.json"
+WIKI_PAGES_FILE = "wiki_pages.json"
+WIKI_BACKUP_FILE = "wiki_backup.json"
 
-# ─── Konfiguration ─────────────────────────────────────────────────────────────
-GUILD_ID         = 1374724357741609041
-TEMP_CATEGORY_ID = 1374724358932664330
-MODEL_ENDPOINT   = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
-
-PROFILES_FILE      = "profiles.json"
-LOG_FILE           = "translation_log.json"
-MENU_FILE          = "translator_menu.json"
-STRIKE_FILE        = "strike_data.json"
-STRIKE_LIST_FILE   = "strike_list.json"
-STRIKE_ROLES_FILE  = "strike_roles.json"
-
-# ─── JSON Helfer ────────────────────────────────────────────────────────────────
-def load_json(path, default):
+# Helper functions for JSON file operations
+def load_json(file_path: str, default):
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    except:
+    except FileNotFoundError:
+        return default
+    except json.JSONDecodeError:
         return default
 
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+def save_json(file_path: str, data):
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
 
-# ─── Daten initialisieren ───────────────────────────────────────────────────────
-profiles        = load_json(PROFILES_FILE, {"Normal":"neutraler professioneller Stil","Flirty":"junger koketter Ton"})
-log_cfg         = load_json(LOG_FILE, {})
-log_channel_id  = log_cfg.get("log_channel_id")
-menu_cfg        = load_json(MENU_FILE, {})
-menu_channel_id = menu_cfg.get("channel_id")
-menu_message_id = menu_cfg.get("message_id")
+# Ensure data files exist with initial structure
+if not os.path.isfile(TRANS_FILE):
+    save_json(TRANS_FILE, {"category_id": None, "log_channel_id": None, "profiles": ["Profil1", "Profil2"]})
+if not os.path.isfile(STRIKE_FILE):
+    save_json(STRIKE_FILE, {"strike_role_id": None, "strikes": {}})
+if not os.path.isfile(WIKI_CONFIG_FILE):
+    save_json(WIKI_CONFIG_FILE, {"main_channel_id": None, "menu_message_id": None})
+if not os.path.isfile(WIKI_PAGES_FILE):
+    save_json(WIKI_PAGES_FILE, {})
 
-strike_data         = load_json(STRIKE_FILE, {})
-strike_list_cfg     = load_json(STRIKE_LIST_FILE, {})
-strike_list_channel_id = strike_list_cfg.get("channel_id")
-strike_roles_cfg    = load_json(STRIKE_ROLES_FILE, {})
-strike_roles        = set(strike_roles_cfg.get("role_ids", []))
-
-active_sessions = {}  # (user_id, profile) -> channel_id
-channel_info     = {} # channel_id -> (user_id, profile, style)
-
-# ─── Bot & Intents ───────────────────────────────────────────────────────────────
+# Initialize Discord bot with intents for members and message content
 intents = discord.Intents.default()
 intents.message_content = True
-intents.members = True  # Für User-Listen!
+intents.members = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ─── Hilfsfunktionen: Rechte ─────────────────────────────────────────────────────
-def is_admin(user):
-    if hasattr(user, "guild_permissions") and user.guild_permissions.administrator:
-        return True
-    if hasattr(user, "id") and user.id == bot.owner_id:
-        return True
-    return False
+# ---------- Translation System ----------
+class TranslationMenuView(discord.ui.View):
+    def __init__(self, profiles: list[str]):
+        super().__init__(timeout=None)
+        # Create a dropdown (Select) for translation profiles
+        options = [discord.SelectOption(label=profile) for profile in profiles]
+        select = discord.ui.Select(
+            placeholder="Übersetzungsprofil auswählen...",
+            options=options,
+            custom_id="translation_profile_select"
+        )
+        async def select_callback(interaction: discord.Interaction):
+            # Defer response to allow processing time
+            await interaction.response.defer(ephemeral=True, thinking=True)
+            profile = select.values[0]
+            user = interaction.user
+            guild = interaction.guild
+            # Load translation config to get category ID and log channel
+            trans_data = load_json(TRANS_FILE, {})
+            category_id = trans_data.get("category_id")
+            if not category_id:
+                await interaction.followup.send("⚠️ Übersetzungskategorie wurde noch nicht festgelegt. Bitte zuerst `/translationsection` verwenden.", ephemeral=True)
+                return
+            category = guild.get_channel(int(category_id))
+            if not category or category.type != discord.ChannelType.category:
+                await interaction.followup.send("⚠️ Ungültige Kategorie. Bitte stelle sicher, dass die Kategorie-ID korrekt ist.", ephemeral=True)
+                return
+            # Generate a unique channel name for the translation channel
+            base_name = f"{profile}-{user.name}".lower()
+            safe_name = re.sub(r'[^a-zA-Z0-9\-]', '-', base_name).strip("-")
+            if not safe_name:
+                safe_name = "übersetzung"
+            safe_name = safe_name[:80]
+            channel_name = safe_name
+            if discord.utils.get(guild.channels, name=channel_name):
+                suffix = secrets.token_hex(2)  # Add random suffix if name exists
+                channel_name = f"{safe_name}-{suffix}"
+            # Create the private translation text channel under the specified category
+            try:
+                new_channel = await guild.create_text_channel(name=channel_name, category=category)
+            except Exception as e:
+                await interaction.followup.send(f"❌ Fehler beim Erstellen des Übersetzungskanals: {e}", ephemeral=True)
+                return
+            # Set channel permissions: deny everyone, allow the requesting user
+            try:
+                await new_channel.set_permissions(guild.default_role, read_messages=False)
+            except:
+                pass
+            try:
+                await new_channel.set_permissions(user, read_messages=True, send_messages=True)
+            except:
+                pass
+            # Log the translation start in the log channel (if configured)
+            log_channel_id = trans_data.get("log_channel_id")
+            if log_channel_id:
+                log_channel = guild.get_channel(int(log_channel_id))
+                if log_channel:
+                    await log_channel.send(f"📔 Übersetzung gestartet von **{user}** – Profil: `{profile}`, Kanal: {new_channel.mention}")
+            # Notify the user that their translation channel is ready
+            await interaction.followup.send(f"✅ Dein Übersetzungskanal wurde erstellt: {new_channel.mention}", ephemeral=True)
+            # Reset the dropdown selection (allow reusing the same profile)
+            new_profiles = load_json(TRANS_FILE, {}).get("profiles", [])
+            await interaction.message.edit(view=TranslationMenuView(new_profiles))
+        select.callback = select_callback
+        self.add_item(select)
 
-async def setup_owner_id():
-    app_info = await bot.application_info()
-    bot.owner_id = app_info.owner.id
+@bot.tree.command(name="translationsection", description="Setzt die Kategorie für Übersetzungskanäle")
+@app_commands.describe(kategorie="Die Kategorie (Channel) für neue Übersetzungskanäle")
+async def translationsection(interaction: discord.Interaction, kategorie: discord.CategoryChannel):
+    # Save the category ID for translation channels
+    trans_data = load_json(TRANS_FILE, {"category_id": None, "log_channel_id": None, "profiles": []})
+    trans_data["category_id"] = str(kategorie.id)
+    save_json(TRANS_FILE, trans_data)
+    profiles = trans_data.get("profiles", [])
+    if not profiles:
+        await interaction.response.send_message(f"Übersetzungskategorie gesetzt auf **{kategorie.name}**. *(Keine Übersetzungsprofile definiert.)*", ephemeral=True)
+    else:
+        # Post the translation profile menu in the current channel
+        view = TranslationMenuView(profiles)
+        await interaction.response.send_message(f"Übersetzungskategorie **{kategorie.name}** gesetzt. Wähle ein Profil, um eine Übersetzung zu starten:", view=view)
 
-def has_strike_role(user):
-    return any(r.id in strike_roles for r in user.roles) or is_admin(user)
+@bot.tree.command(name="translationlog", description="Setzt den Log-Channel für Übersetzungsprotokolle")
+@app_commands.describe(channel="Channel für Übersetzungs-Logs")
+async def translationlog(interaction: discord.Interaction, channel: discord.TextChannel):
+    # Save the log channel ID for translation events
+    trans_data = load_json(TRANS_FILE, {"category_id": None, "log_channel_id": None, "profiles": []})
+    trans_data["log_channel_id"] = str(channel.id)
+    save_json(TRANS_FILE, trans_data)
+    await interaction.response.send_message(f"✅ Log-Channel für Übersetzungen gesetzt: {channel.mention}", ephemeral=True)
 
-# ─── Google Gemini API-Aufruf ───────────────────────────────────────────────────
-async def call_gemini(prompt: str) -> str:
-    payload = {
-        "system_instruction": {"role":"system","parts":[{"text":prompt}]},
-        "contents": [{"role":"user","parts":[{"text":prompt}]}]
-    }
-    params = {"key": GOOGLE_API_KEY}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(MODEL_ENDPOINT, params=params, json=payload) as resp:
-            if resp.status != 200:
-                await resp.text()
-                return "*Fehler bei Übersetzung*"
-            data = await resp.json()
-    cands = data.get("candidates", [])
-    if not cands:
-        return "*Fehler bei Übersetzung*"
-    parts = cands[0].get("content", {}).get("parts", [])
-    return "".join(p.get("text","") for p in parts).strip()
+# ---------- Strike System ----------
+def generate_strike_list_text(strike_data: dict, guild: discord.Guild):
+    strikes = strike_data.get("strikes", {})
+    if not strikes:
+        return "*(Noch keine Strikes vergeben.)*"
+    lines = ["**Strike-Liste:**"]
+    for user_id, count in strikes.items():
+        member = guild.get_member(int(user_id))
+        name = member.display_name if member else f"Unbekanntes Mitglied ({user_id})"
+        lines.append(f"- {name}: **{count}** Strike{'s' if count != 1 else ''}")
+    return "\n".join(lines)
 
-# ─── Menü mit Dropdown ───────────────────────────────────────────────────────────
-def make_translation_menu():
-    embed = discord.Embed(
-        title="📝 Translation Support",
-        description="Wähle dein Profil aus, um eine private Übersetzungs-Session zu starten:",
-        color=discord.Color.teal()
-    )
-    view = discord.ui.View(timeout=None)
-    options = [discord.SelectOption(label=nm, description=profiles[nm]) for nm in profiles]
-    sel = discord.ui.Select(placeholder="Profil wählen...", options=options, max_values=1)
-    async def sel_cb(inter: discord.Interaction):
-        prof = inter.data["values"][0]
-        await start_session(inter, prof)
-    sel.callback = sel_cb
-    view.add_item(sel)
-    return embed, view
+class StrikeView(discord.ui.View):
+    def __init__(self, guild: discord.Guild, strike_data: dict):
+        super().__init__(timeout=None)
+        # Create dropdown for selecting a member to give a strike
+        options = [discord.SelectOption(label="Keinen", value="none")]
+        members = [m for m in guild.members if not m.bot]
+        members.sort(key=lambda m: m.display_name.lower())
+        for m in members:
+            label = m.display_name
+            if len(label) > 25:
+                label = label[:22] + "..."
+            options.append(discord.SelectOption(label=label, value=str(m.id)))
+            if len(options) >= 25:
+                break  # Discord allows max 25 options
+        select = discord.ui.Select(
+            placeholder="Mitglied für einen Strike auswählen...",
+            options=options,
+            custom_id="strike_user_select"
+        )
+        async def select_callback(interaction: discord.Interaction):
+            value = select.values[0]
+            if value == "none":
+                await interaction.response.send_message("⚠️ Kein Mitglied ausgewählt. Vorgang abgebrochen.", ephemeral=True)
+                return
+            guild = interaction.guild
+            user_id = int(value)
+            member = guild.get_member(user_id)
+            if not member:
+                await interaction.response.send_message("❌ Mitglied nicht gefunden (möglicherweise hat es den Server verlassen).", ephemeral=True)
+                return
+            # Load strike data and increment the user's strike count
+            strike_data = load_json(STRIKE_FILE, {"strike_role_id": None, "strikes": {}})
+            strikes = strike_data.get("strikes", {})
+            current = strikes.get(str(user_id), 0)
+            new_count = current + 1
+            strikes[str(user_id)] = new_count
+            strike_data["strikes"] = strikes
+            save_json(STRIKE_FILE, strike_data)
+            # Assign the strike role if this was the 3rd strike
+            role_id = strike_data.get("strike_role_id")
+            role_assigned = False
+            role = None
+            if role_id:
+                role = guild.get_role(int(role_id))
+                if new_count == 3 and role:
+                    try:
+                        await member.add_roles(role)
+                        role_assigned = True
+                    except:
+                        role_assigned = False
+            # Prepare feedback message for the moderator
+            if new_count == 3:
+                if role and role_assigned:
+                    resp = f"⚠️ {member.mention} hat nun **3** Strikes und erhält automatisch die Rolle **{role.name}**."
+                elif role and not role_assigned:
+                    resp = f"⚠️ {member.mention} hat nun **3** Strikes. *(Rolle **{role.name}** konnte nicht zugewiesen werden.)*"
+                else:
+                    resp = f"⚠️ {member.mention} hat nun **3** Strikes."
+            else:
+                resp = f"✔️ {member.mention} hat nun **{new_count}** Strikes."
+            await interaction.response.send_message(resp, ephemeral=True)
+            # Update the strike panel message with new list and reset dropdown
+            text = generate_strike_list_text(strike_data, guild)
+            await interaction.message.edit(content=text, view=StrikeView(guild, strike_data))
+        select.callback = select_callback
+        self.add_item(select)
 
-# ─── Menü aktualisieren ─────────────────────────────────────────────────────────
-async def update_translation_menu():
-    global menu_channel_id, menu_message_id
-    if not (menu_channel_id and menu_message_id):
+@bot.tree.command(name="strikeaddrole", description="Legt eine Rolle fest, die beim dritten Strike vergeben wird")
+@app_commands.describe(role="Rolle, die ab 3 Strikes automatisch zugewiesen wird")
+async def strikeaddrole(interaction: discord.Interaction, role: discord.Role):
+    # Save the role ID that should be assigned at 3 strikes
+    strike_data = load_json(STRIKE_FILE, {"strike_role_id": None, "strikes": {}})
+    strike_data["strike_role_id"] = str(role.id)
+    save_json(STRIKE_FILE, strike_data)
+    await interaction.response.send_message(f"✅ Rolle **{role.name}** wird nun bei 3 Strikes automatisch vergeben.", ephemeral=True)
+
+@bot.tree.command(name="strikemain", description="Zeigt das Strike-Verwaltungsmenü mit Mitglieder-Dropdown")
+async def strikemain(interaction: discord.Interaction):
+    # Display the strike management panel with dropdown and current strike list
+    strike_data = load_json(STRIKE_FILE, {"strike_role_id": None, "strikes": {}})
+    text = generate_strike_list_text(strike_data, interaction.guild)
+    view = StrikeView(interaction.guild, strike_data)
+    await interaction.response.send_message(text, view=view)
+
+@bot.tree.command(name="strikelist", description="Listet alle aktuellen Strikes auf")
+async def strikelist(interaction: discord.Interaction):
+    # Show the current strike list (ephemeral to the user invoking)
+    strike_data = load_json(STRIKE_FILE, {"strike_role_id": None, "strikes": {}})
+    text = generate_strike_list_text(strike_data, interaction.guild)
+    await interaction.response.send_message(text, ephemeral=True)
+
+# ---------- Wiki System ----------
+wiki_group = app_commands.Group(name="wiki", description="Wiki-Verwaltung")
+
+@wiki_group.command(name="page", description="Speichert die Nachrichten des aktuellen Kanals als Wiki-Seite")
+async def wiki_page(interaction: discord.Interaction):
+    channel = interaction.channel
+    if not isinstance(channel, discord.TextChannel):
+        await interaction.response.send_message("❌ Dieser Befehl kann nur in Textkanälen verwendet werden.", ephemeral=True)
         return
-    ch = bot.get_channel(menu_channel_id)
-    if not ch:
+    page_title = channel.name
+    # Defer as reading channel history might take time
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    messages = [msg async for msg in channel.history(limit=None, oldest_first=True)]
+    content_lines = []
+    for msg in messages:
+        if msg.author.bot:
+            continue
+        line = msg.content
+        if msg.attachments:
+            for attachment in msg.attachments:
+                line += f"\n[Anhang: {attachment.url}]"
+        if line:
+            content_lines.append(line)
+    page_content = "\n".join(content_lines)
+    # Backup current pages and save new/updated page
+    pages = load_json(WIKI_PAGES_FILE, {})
+    backup = pages.copy()
+    save_json(WIKI_BACKUP_FILE, backup)
+    pages[page_title] = page_content
+    save_json(WIKI_PAGES_FILE, pages)
+    # Update the wiki menu if it exists
+    wiki_config = load_json(WIKI_CONFIG_FILE, {"main_channel_id": None, "menu_message_id": None})
+    main_channel_id = wiki_config.get("main_channel_id")
+    menu_message_id = wiki_config.get("menu_message_id")
+    if main_channel_id and menu_message_id:
+        main_channel = interaction.guild.get_channel(int(main_channel_id))
+        if main_channel:
+            try:
+                menu_msg = await main_channel.fetch_message(int(menu_message_id))
+                content_text = "📚 **Wiki-Menü:** Wähle eine Seite aus dem Dropdown aus, um sie per DM zu erhalten."
+                view = WikiMenuView(pages)
+                await menu_msg.edit(content=content_text, view=view)
+            except:
+                # If menu message was deleted, send a new one
+                new_msg = await main_channel.send("📚 **Wiki-Menü:** Wähle eine Seite aus dem Dropdown aus, um sie per DM zu erhalten.", view=WikiMenuView(pages))
+                wiki_config["menu_message_id"] = str(new_msg.id)
+                save_json(WIKI_CONFIG_FILE, wiki_config)
+    await interaction.followup.send(f"✅ Wiki-Seite **{page_title}** wurde gespeichert.", ephemeral=True)
+
+@wiki_group.command(name="undo", description="Stellt alle gespeicherten Wiki-Seiten aus dem Backup wieder her")
+async def wiki_undo(interaction: discord.Interaction):
+    backup_pages = load_json(WIKI_BACKUP_FILE, None)
+    if backup_pages is None:
+        await interaction.response.send_message("⚠️ Kein Backup zum Wiederherstellen gefunden.", ephemeral=True)
         return
-    try:
-        msg = await ch.fetch_message(menu_message_id)
-        embed, view = make_translation_menu()
-        await msg.edit(embed=embed, view=view)
-    except:
-        pass
+    save_json(WIKI_PAGES_FILE, backup_pages)
+    # Update the wiki menu to reflect the restored pages
+    wiki_config = load_json(WIKI_CONFIG_FILE, {"main_channel_id": None, "menu_message_id": None})
+    main_channel_id = wiki_config.get("main_channel_id")
+    menu_message_id = wiki_config.get("menu_message_id")
+    if main_channel_id and menu_message_id:
+        main_channel = interaction.guild.get_channel(int(main_channel_id))
+        if main_channel:
+            try:
+                menu_msg = await main_channel.fetch_message(int(menu_message_id))
+                pages = backup_pages
+                content_text = "📚 **Wiki-Menü:** Wähle eine Seite aus dem Dropdown aus, um sie per DM zu erhalten." if pages else "📚 **Wiki-Menü:** *(noch keine Seiten gespeichert)*"
+                view = WikiMenuView(pages)
+                await menu_msg.edit(content=content_text, view=view)
+            except:
+                new_msg = await main_channel.send(
+                    "📚 **Wiki-Menü:** *(noch keine Seiten gespeichert)*" if not backup_pages else 
+                    "📚 **Wiki-Menü:** Wähle eine Seite aus dem Dropdown aus, um sie per DM zu erhalten.",
+                    view=WikiMenuView(backup_pages)
+                )
+                wiki_config["menu_message_id"] = str(new_msg.id)
+                save_json(WIKI_CONFIG_FILE, wiki_config)
+    await interaction.response.send_message("♻️ Wiki-Seiten aus Backup wiederhergestellt.", ephemeral=True)
 
-# ─── Session starten ─────────────────────────────────────────────────────────────
-async def start_session(interaction: discord.Interaction, prof: str):
-    user = interaction.user
-    style = profiles[prof]
-    key = (user.id, prof)
-    if key in active_sessions:
-        old = active_sessions[key]
-        if not bot.get_channel(old):
-            del active_sessions[key]
-    if key in active_sessions:
-        return await interaction.response.send_message("Du hast bereits eine aktive Session.", ephemeral=True)
+# Add the wiki command group to the bot
+bot.tree.add_command(wiki_group)
 
-    guild = interaction.guild
-    overwrites = {
-        guild.default_role: discord.PermissionOverwrite(view_channel=False),
-        user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
-        guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
-    }
-    chan_name = f"translate-{prof.lower()}"
-    old = discord.utils.get(bot.temp_category.text_channels, name=chan_name)
-    if old:
-        await old.delete()
-    ch = await guild.create_text_channel(chan_name, category=bot.temp_category, overwrites=overwrites)
-    active_sessions[key] = ch.id
-    channel_info[ch.id] = (user.id, prof, style)
+class WikiMenuView(discord.ui.View):
+    def __init__(self, pages: dict[str, str]):
+        super().__init__(timeout=None)
+        # Create dropdown for available wiki pages
+        options = []
+        for title in pages.keys():
+            label = title[:100] if len(title) > 100 else title
+            options.append(discord.SelectOption(label=label, value=title))
+            if len(options) >= 25:
+                break
+        if not options:
+            options.append(discord.SelectOption(label="Keine Seiten verfügbar", value="none", default=True))
+        select = discord.ui.Select(
+            placeholder="Wiki-Seite auswählen...",
+            options=options,
+            custom_id="wiki_page_select"
+        )
+        if not pages:
+            select.disabled = True
+        async def select_callback(interaction: discord.Interaction):
+            page_title = select.values[0]
+            if page_title == "none":
+                await interaction.response.send_message("⚠️ Keine Wiki-Seiten verfügbar.", ephemeral=True)
+                return
+            pages_data = load_json(WIKI_PAGES_FILE, {})
+            content = pages_data.get(page_title)
+            if content is None:
+                await interaction.response.send_message("❌ Seite wurde nicht gefunden.", ephemeral=True)
+                return
+            try:
+                if content and len(content) <= 1900:
+                    await interaction.user.send(f"**Wiki-Seite: {page_title}**\n{content}")
+                else:
+                    safe_filename = re.sub(r'[^A-Za-z0-9\-_\.]', '_', f"{page_title}.txt")
+                    with open(safe_filename, "w", encoding="utf-8") as f:
+                        f.write(content or "(Seite ist leer)")
+                    await interaction.user.send(file=discord.File(safe_filename))
+                    os.remove(safe_filename)
+                await interaction.response.send_message(f"📩 Inhalt der Seite **{page_title}** wurde dir per DM geschickt.", ephemeral=True)
+            except discord.Forbidden:
+                await interaction.response.send_message("❌ Konnte keine DM senden. Bitte prüfe deine Einstellungen.", ephemeral=True)
+        select.callback = select_callback
+        self.add_item(select)
 
-    btn = discord.ui.Button(label="Beenden", style=discord.ButtonStyle.danger)
-    async def end_cb(bi: discord.Interaction):
-        info = channel_info.get(ch.id)
-        if not info or bi.user.id != info[0]:
-            return await bi.response.send_message("Nur der Besitzer kann beenden.", ephemeral=True)
-        await bi.response.send_message("Session beendet.", ephemeral=True)
-        await ch.delete()
-    btn.callback = end_cb
-    v = discord.ui.View(timeout=None)
-    v.add_item(btn)
+@bot.tree.command(name="wikimain", description="Setzt den Hauptkanal für das Wiki-Menü")
+@app_commands.describe(channel="Textkanal, in dem das Wiki-Hauptmenü angezeigt werden soll")
+async def wikimain(interaction: discord.Interaction, channel: discord.TextChannel):
+    # Save the main wiki channel and post the wiki menu there
+    wiki_config = load_json(WIKI_CONFIG_FILE, {"main_channel_id": None, "menu_message_id": None})
+    # Remove old menu if moving to a new channel
+    if wiki_config.get("menu_message_id"):
+        try:
+            old_channel = interaction.guild.get_channel(int(wiki_config["main_channel_id"]))
+            if old_channel:
+                old_msg = await old_channel.fetch_message(int(wiki_config["menu_message_id"]))
+                await old_msg.delete()
+        except:
+            pass
+    wiki_config["main_channel_id"] = str(channel.id)
+    wiki_config["menu_message_id"] = None
+    save_json(WIKI_CONFIG_FILE, wiki_config)
+    pages = load_json(WIKI_PAGES_FILE, {})
+    content_text = "📚 **Wiki-Menü:** Wähle eine Seite aus dem Dropdown aus, um sie per DM zu erhalten." if pages else "📚 **Wiki-Menü:** *(noch keine Seiten gespeichert)*"
+    view = WikiMenuView(pages)
+    message = await channel.send(content_text, view=view)
+    # Save the new menu message ID
+    wiki_config["menu_message_id"] = str(message.id)
+    save_json(WIKI_CONFIG_FILE, wiki_config)
+    await interaction.response.send_message(f"✅ Wiki-Hauptkanal gesetzt: {channel.mention}", ephemeral=True)
 
-    await ch.send(f"Session **{prof}** gestartet. Schreibe hier zum Übersetzen.", view=v)
-    await interaction.response.send_message(f"Session erstellt: {ch.mention}", ephemeral=True)
-
-# ─── Events ─────────────────────────────────────────────────────────────────────
+# When the bot is ready, register persistent views and sync commands
 @bot.event
 async def on_ready():
-    await setup_owner_id()
     try:
-        guild = bot.get_guild(GUILD_ID)
-        if guild:
-            bot.tree.copy_global_to(guild=guild)
-            await bot.tree.sync(guild=guild)
+        if TEST_GUILD_ID:
+            await bot.tree.sync(guild=discord.Object(id=int(TEST_GUILD_ID)))
         else:
             await bot.tree.sync()
     except Exception as e:
-        print("Sync-Error:", e)
-    bot.temp_category = bot.get_channel(TEMP_CATEGORY_ID)
-    bot.log_channel   = bot.get_channel(log_channel_id) if log_channel_id else None
-    print(f"✅ Bot bereit als {bot.user}")
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot or message.guild is None or message.channel.category_id != TEMP_CATEGORY_ID:
-        return
-    info = channel_info.get(message.channel.id)
-    if not info or message.author.id != info[0]:
-        return
-    txt = message.content.strip()
-    if not txt:
-        return
-
-    prompt = (
-        f"Erkenne die Sprache des folgenden OnlyFans-Chat-Textes. "
-        f"Wenn es Deutsch ist, übersetze ihn nuanciert ins Englische im Stil: {info[2]}. "
-        f"Wenn es Englisch ist, übersetze ihn nuanciert ins Deutsche im Stil: {info[2]}. "
-        "Verwende authentischen Slang, Chat-Sprache, keine Emojis. "
-        "Es soll spontan, emotional und natürlich klingen, nicht KI-generiert. "
-        "Finde echte Äquivalente für kulturelle Referenzen. "
-        "Antworte NUR mit der Übersetzung und nichts anderem:\n"
-        f"{txt}"
-    )
-    footer = "Auto-Detected Translation"
-
-    try:
-        translation = await asyncio.wait_for(call_gemini(prompt), timeout=20)
-    except:
-        translation = "*Fehler bei Übersetzung*"
-
-    emb = discord.Embed(description=f"```{translation}```", color=discord.Color.blue())
-    emb.set_footer(text=footer)
-    await message.channel.send(embed=emb)
-
-    if bot.log_channel:
-        log_e = discord.Embed(title="Übersetzung", color=discord.Color.orange())
-        log_e.add_field(name="Profil", value=info[1], inline=False)
-        log_e.add_field(name="Original", value=txt, inline=False)
-        log_e.add_field(name="Übersetzung", value=translation, inline=False)
-        await bot.log_channel.send(embed=log_e)
-
-    await bot.process_commands(message)
-
-# ─── TRANSLATION: Slash-Commands (Owner/Admin only) ─────────────────────────────
-def owner_or_admin_check(interaction):
-    return is_admin(interaction.user) or (hasattr(bot, "owner_id") and interaction.user.id == bot.owner_id)
-
-@bot.tree.command(name="translatorpost", description="Postet das Übersetzungsmenü im aktuellen Kanal", guild=discord.Object(id=GUILD_ID))
-async def translatorpost(interaction: discord.Interaction):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    embed, view = make_translation_menu()
-    msg = await interaction.channel.send(embed=embed, view=view)
-    global menu_channel_id, menu_message_id
-    menu_channel_id = interaction.channel.id
-    menu_message_id = msg.id
-    save_json(MENU_FILE, {"channel_id": menu_channel_id, "message_id": menu_message_id})
-    await interaction.response.send_message("Übersetzungsmenü gepostet.", ephemeral=True)
-
-@bot.tree.command(name="addprofile", description="Fügt ein neues Profil hinzu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(name="Profilname", style="Stilbeschreibung")
-async def addprofile(interaction: discord.Interaction, name: str, style: str):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    nm = name.strip()
-    if not nm or nm in profiles:
-        return await interaction.response.send_message("Ungültiger oder existierender Name.", ephemeral=True)
-    profiles[nm] = style
-    save_json(PROFILES_FILE, profiles)
-    await interaction.response.send_message(f"Profil **{nm}** hinzugefügt.", ephemeral=True)
-    await update_translation_menu()
-
-@bot.tree.command(name="delprofile", description="Löscht ein Profil", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(name="Profilname")
-async def delprofile(interaction: discord.Interaction, name: str):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    if name not in profiles:
-        return await interaction.response.send_message(f"Profil `{name}` nicht gefunden.", ephemeral=True)
-    profiles.pop(name)
-    save_json(PROFILES_FILE, profiles)
-    await interaction.response.send_message(f"Profil **{name}** gelöscht.", ephemeral=True)
-    await update_translation_menu()
-
-@bot.tree.command(name="translationlog", description="Setzt den Log-Kanal", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(channel="Text-Kanal für Logs")
-async def translationlog(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global log_channel_id
-    log_channel_id = channel.id
-    save_json(LOG_FILE, {"log_channel_id": log_channel_id})
-    bot.log_channel = channel
-    await interaction.response.send_message(f"Log-Kanal gesetzt: {channel.mention}", ephemeral=True)
-
-# ─── STRIKE SYSTEM ──────────────────────────────────────────────────────────────
-
-def load_strikes():
-    return load_json(STRIKE_FILE, {})
-def save_strikes(data):
-    save_json(STRIKE_FILE, data)
-def load_strike_roles():
-    return set(load_json(STRIKE_ROLES_FILE, {}).get("role_ids", []))
-def save_strike_roles(role_ids):
-    save_json(STRIKE_ROLES_FILE, {"role_ids": list(role_ids)})
-def load_strike_list_cfg():
-    return load_json(STRIKE_LIST_FILE, {})
-def save_strike_list_cfg(data):
-    save_json(STRIKE_LIST_FILE, data)
-
-async def get_guild_members(guild):
-    return [m for m in guild.members if not m.bot]
-
-@bot.tree.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(channel="Channel für Strikes")
-async def strikelist(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global strike_list_channel_id
-    strike_list_channel_id = channel.id
-    save_strike_list_cfg({"channel_id": channel.id})
-    await interaction.response.send_message(f"Strike-Übersicht wird jetzt hier gepostet: {channel.mention}", ephemeral=True)
-    await update_strike_list()
-
-@bot.tree.command(name="strikerole", description="Fügt eine Rolle zu den Strike-Berechtigten hinzu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikerole(interaction: discord.Interaction, role: discord.Role):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global strike_roles
-    strike_roles.add(role.id)
-    save_strike_roles(strike_roles)
-    await interaction.response.send_message(f"Rolle **{role.name}** ist jetzt Strike-Berechtigt.", ephemeral=True)
-
-@bot.tree.command(name="strikeroleremove", description="Entfernt eine Rolle von den Strike-Berechtigten", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikeroleremove(interaction: discord.Interaction, role: discord.Role):
-    if not owner_or_admin_check(interaction):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global strike_roles
-    if role.id in strike_roles:
-        strike_roles.remove(role.id)
-        save_strike_roles(strike_roles)
-        await interaction.response.send_message(f"Rolle **{role.name}** ist **nicht mehr** Strike-Berechtigt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
-
-# -- STRIKEMAIN: Sichtbar für alle, Strike vergeben NUR für Berechtigte --
-@bot.tree.command(name="strikemain", description="Strike-Menü im Channel posten", guild=discord.Object(id=GUILD_ID))
-async def strikemain(interaction: discord.Interaction):
-    members = await get_guild_members(interaction.guild)
-    options = [discord.SelectOption(label=f"{m.display_name}", value=str(m.id)) for m in members]
-    sel = discord.ui.Select(placeholder="User wählen", options=options, max_values=1)
-    view = discord.ui.View(timeout=None)
-    async def sel_cb(inter):
-        if not has_strike_role(inter.user):
-            return await inter.response.send_message("Du hast keine Berechtigung für das Strike-System.", ephemeral=True)
-        uid = int(inter.data["values"][0])
-        modal = discord.ui.Modal(title="Strike vergeben")
-        reason = discord.ui.TextInput(label="Grund", style=discord.TextStyle.long, required=True)
-        imgurl = discord.ui.TextInput(label="Bild-Link (optional)", style=discord.TextStyle.short, required=False)
-        modal.add_item(reason)
-        modal.add_item(imgurl)
-        async def on_submit(m_inter):
-            strikes = load_strikes()
-            entry = {
-                "reason": reason.value,
-                "image": imgurl.value,
-                "by": inter.user.display_name,
-                "timestamp": datetime.datetime.now().isoformat(timespec="seconds")
-            }
-            strikes.setdefault(str(uid), []).append(entry)
-            save_strikes(strikes)
-            strike_count = len(strikes[str(uid)])
-            # ---- Strike DM je nach Anzahl ----
-            if strike_count == 1:
-                msg = (
-                    f"Du hast einen **Strike** bekommen wegen:\n```{reason.value}```"
-                    f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
-                    "\nBitte melde dich bei einem Operation Lead!"
-                )
-            elif strike_count == 2:
-                msg = (
-                    f"Du hast jetzt schon deinen **2ten Strike** bekommen, schau dir die Regeln nochmal an.\n"
-                    f"Du hast ihn erhalten:\n```{reason.value}```"
-                    f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
-                    "\nMeld dich bei einem Teamlead um darüber zu sprechen!"
-                )
-            else:
-                msg = (
-                    f"Es ist soweit... du hast deinen **3ten Strike** gesammelt...\n"
-                    f"```{reason.value}```"
-                    f"{f'\n\nBild: {imgurl.value}' if imgurl.value else ''}\n"
-                    "Jetzt muss leider eine Bestrafung folgen, darum melde dich schnellstmöglich bei einem TeamLead."
-                )
-            # DM an User
+        print(f"Error syncing commands: {e}")
+    # Register persistent views for menus
+    trans_data = load_json(TRANS_FILE, {"category_id": None, "log_channel_id": None, "profiles": []})
+    bot.add_view(TranslationMenuView(trans_data.get("profiles", [])))
+    if bot.guilds:
+        target_guild = discord.utils.get(bot.guilds, id=int(TEST_GUILD_ID)) if TEST_GUILD_ID else bot.guilds[0]
+        strike_data = load_json(STRIKE_FILE, {"strike_role_id": None, "strikes": {}})
+        bot.add_view(StrikeView(target_guild, strike_data))
+    pages = load_json(WIKI_PAGES_FILE, {})
+    bot.add_view(WikiMenuView(pages))
+    # Optionally refresh wiki menu message to match current pages (in case of changes while offline)
+    wiki_config = load_json(WIKI_CONFIG_FILE, {"main_channel_id": None, "menu_message_id": None})
+    if wiki_config.get("main_channel_id") and wiki_config.get("menu_message_id"):
+        main_channel = bot.get_channel(int(wiki_config["main_channel_id"]))
+        if main_channel:
             try:
-                user = interaction.guild.get_member(uid)
-                if user:
-                    await user.send(msg)
+                menu_msg = await main_channel.fetch_message(int(wiki_config["menu_message_id"]))
+                content_text = "📚 **Wiki-Menü:** Wähle eine Seite aus dem Dropdown aus, um sie per DM zu erhalten." if pages else "📚 **Wiki-Menü:** *(noch keine Seiten gespeichert)*"
+                await menu_msg.edit(content=content_text, view=WikiMenuView(pages))
             except Exception as e:
-                pass
-            await m_inter.response.send_message(f"Strike für <@{uid}> gespeichert!", ephemeral=True)
-            await update_strike_list()
-        modal.on_submit = on_submit
-        await inter.response.send_modal(modal)
-    sel.callback = sel_cb
-    view.add_item(sel)
-    await interaction.channel.send("Wähle einen User für einen Strike:", view=view)
-
-# --- STRIKELIST SCHÖNER FORMAT & BUTTON CALLBACK NUR CHANNEL-EPHEMERAL ---
-async def update_strike_list():
-    global strike_list_channel_id
-    if not strike_list_channel_id:
-        return
-    ch = bot.get_channel(strike_list_channel_id)
-    if not ch:
-        return
-    strikes = load_strikes()
-    async for msg in ch.history(limit=100):
-        if msg.author == bot.user:
-            await msg.delete()
-    if not strikes:
-        await ch.send("⚡️ Aktuell keine Strikes.")
-        return
-    await ch.send("Strikeliste\n-----------------")
-    for uid, strike_list in strikes.items():
-        if not strike_list:
-            continue
-        user = ch.guild.get_member(int(uid))
-        uname = user.mention if user else f"<@{uid}>"
-        n = len(strike_list)
-        btn = discord.ui.Button(label=f"Strikes: {n}", style=discord.ButtonStyle.primary)
-        async def btn_cb(inter, uid=uid):
-            strikes = load_strikes()
-            entrys = strikes.get(uid, [])
-            lines = []
-            for i, entry in enumerate(entrys, 1):
-                s = f"{i}. {entry['reason']} | {entry['image']}" if entry['image'] else f"{i}. {entry['reason']}"
-                lines.append(s)
-            msg_txt = f"{uname} hat folgende Strikes =>\n" + "\n".join(lines)
-            await inter.response.send_message(msg_txt, ephemeral=True)
-        btn.callback = btn_cb
-        v = discord.ui.View(timeout=None)
-        v.add_item(btn)
-        await ch.send(f"{uname}\n", view=v)
-        await ch.send("-----------------")
-
-@bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User zum Löschen")
-async def strikedelete(interaction: discord.Interaction, user: discord.Member):
-    if not has_strike_role(interaction.user):
-        return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
-    strikes = load_strikes()
-    if str(user.id) in strikes:
-        strikes.pop(str(user.id))
-        save_strikes(strikes)
-        await update_strike_list()
-        await interaction.response.send_message(f"Alle Strikes für {user.mention} entfernt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
-
-@bot.tree.command(name="strikeremove", description="Entfernt einen Strike", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User für Strike-Abbau")
-async def strikeremove(interaction: discord.Interaction, user: discord.Member):
-    if not has_strike_role(interaction.user):
-        return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
-    strikes = load_strikes()
-    entrys = strikes.get(str(user.id), [])
-    if entrys:
-        entrys.pop()
-        if not entrys:
-            strikes.pop(str(user.id))
-        else:
-            strikes[str(user.id)] = entrys
-        save_strikes(strikes)
-        await update_strike_list()
-        await interaction.response.send_message(f"Ein Strike für {user.mention} entfernt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
-
-# --- NEU: STRIKEVIEW für User ---
-@bot.tree.command(name="strikeview", description="Zeigt dir, wie viele Strikes du hast (nur für dich selbst).", guild=discord.Object(id=GUILD_ID))
-async def strikeview(interaction: discord.Interaction):
-    strikes = load_strikes()
-    user_id = str(interaction.user.id)
-    count = len(strikes.get(user_id, []))
-    try:
-        msg = (
-            f"👮‍♂️ **Strike-Übersicht** für {interaction.user.mention}:\n\n"
-            f"Du hast aktuell **{count} Strike{'s' if count!=1 else ''}**.\n"
-            f"{'Wenn du mehr wissen willst, schreibe dem Bot einfach eine DM.' if count else 'Du hast aktuell keine Strikes.'}"
-        )
-        await interaction.user.send(msg)
-        await interaction.response.send_message("Ich habe dir eine private Nachricht mit deiner Strike-Anzahl geschickt.", ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message("Ich konnte dir leider keine DM schicken. Hast du deine DMs deaktiviert?", ephemeral=True)
-
-# ─── Bot starten ───────────────────────────────────────────────────────────────
-bot.run(DISCORD_TOKEN)
+                print("Wiki menu update error:", e)
+    print(f"✅ Bot ist online als {bot.user}.")
+# Run the bot using token from .env (uncomment the next line in production)
+# bot.run(TOKEN)
