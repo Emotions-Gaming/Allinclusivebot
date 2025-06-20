@@ -67,7 +67,6 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # ─── Hilfsfunktionen: Rechte ─────────────────────────────────────────────────────
 def is_admin(user):
-    # Guild owner oder Administrator
     if hasattr(user, "guild_permissions") and user.guild_permissions.administrator:
         return True
     if hasattr(user, "id") and user.id == bot.owner_id:
@@ -137,7 +136,6 @@ async def start_session(interaction: discord.Interaction, prof: str):
     user = interaction.user
     style = profiles[prof]
     key = (user.id, prof)
-    # Alte Session clean
     if key in active_sessions:
         old = active_sessions[key]
         if not bot.get_channel(old):
@@ -304,9 +302,9 @@ async def get_guild_members(guild):
     return [m for m in guild.members if not m.bot]
 
 # ---- STRIKE LIST CHANNEL ----
-@bot.tree.command(name="StrikeList", description="Setzt den Channel für die Strike-Übersicht", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(channel="Channel für Strikes")
-async def set_strike_list(interaction: discord.Interaction, channel: discord.TextChannel):
+async def strikelist(interaction: discord.Interaction, channel: discord.TextChannel):
     if not owner_or_admin_check(interaction):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     global strike_list_channel_id
@@ -316,9 +314,9 @@ async def set_strike_list(interaction: discord.Interaction, channel: discord.Tex
     await update_strike_list()
 
 # ---- STRIKE ROLE MANAGEMENT ----
-@bot.tree.command(name="StrikeRole", description="Fügt eine Rolle zu den Strike-Berechtigten hinzu", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikerole", description="Fügt eine Rolle zu den Strike-Berechtigten hinzu", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(role="Discord Rolle")
-async def strike_role(interaction: discord.Interaction, role: discord.Role):
+async def strikerole(interaction: discord.Interaction, role: discord.Role):
     if not owner_or_admin_check(interaction):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     global strike_roles
@@ -326,9 +324,9 @@ async def strike_role(interaction: discord.Interaction, role: discord.Role):
     save_strike_roles(strike_roles)
     await interaction.response.send_message(f"Rolle **{role.name}** ist jetzt Strike-Berechtigt.", ephemeral=True)
 
-@bot.tree.command(name="StrikeRoleRemove", description="Entfernt eine Rolle von den Strike-Berechtigten", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikeroleremove", description="Entfernt eine Rolle von den Strike-Berechtigten", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(role="Discord Rolle")
-async def strike_role_remove(interaction: discord.Interaction, role: discord.Role):
+async def strikeroleremove(interaction: discord.Interaction, role: discord.Role):
     if not owner_or_admin_check(interaction):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     global strike_roles
@@ -340,8 +338,8 @@ async def strike_role_remove(interaction: discord.Interaction, role: discord.Rol
         await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
 
 # ---- STRIKE MAIN: Dropdown & Modal ----
-@bot.tree.command(name="StrikeMain", description="Startet das Strike-Menü", guild=discord.Object(id=GUILD_ID))
-async def strike_main(interaction: discord.Interaction):
+@bot.tree.command(name="strikemain", description="Startet das Strike-Menü", guild=discord.Object(id=GUILD_ID))
+async def strikemain(interaction: discord.Interaction):
     if not has_strike_role(interaction.user):
         return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
     members = await get_guild_members(interaction.guild)
@@ -393,7 +391,6 @@ async def update_strike_list():
     if not ch:
         return
     strikes = load_strikes()
-    # Alte Strike-Listen-Nachrichten löschen (optional)
     async for msg in ch.history(limit=100):
         if msg.author == bot.user:
             await msg.delete()
@@ -406,7 +403,6 @@ async def update_strike_list():
         user = ch.guild.get_member(int(uid))
         uname = user.mention if user else f"<@{uid}>"
         n = len(strike_list)
-        # Button für Strike-Details
         btn = discord.ui.Button(label=f"Strikes: {n}", style=discord.ButtonStyle.primary)
         async def btn_cb(inter, uid=uid):
             strikes = load_strikes()
@@ -428,9 +424,9 @@ async def update_strike_list():
         await ch.send(f"{uname} [{user.display_name if user else ''}] => ", view=v)
 
 # ---- STRIKE DELETE ----
-@bot.tree.command(name="StrikeDelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User zum Löschen")
-async def strike_delete(interaction: discord.Interaction, user: discord.Member):
+async def strikedelete(interaction: discord.Interaction, user: discord.Member):
     if not has_strike_role(interaction.user):
         return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
     strikes = load_strikes()
@@ -443,9 +439,9 @@ async def strike_delete(interaction: discord.Interaction, user: discord.Member):
         await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
 
 # ---- STRIKE REMOVE ----
-@bot.tree.command(name="StrikeRemove", description="Entfernt einen Strike", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="strikeremove", description="Entfernt einen Strike", guild=discord.Object(id=GUILD_ID))
 @app_commands.describe(user="User für Strike-Abbau")
-async def strike_remove(interaction: discord.Interaction, user: discord.Member):
+async def strikeremove(interaction: discord.Interaction, user: discord.Member):
     if not has_strike_role(interaction.user):
         return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
     strikes = load_strikes()
