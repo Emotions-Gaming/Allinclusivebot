@@ -592,7 +592,7 @@ def split_long_text(text, prefix=""):
     parts = []
     while text:
         chunk = text[:maxlen]
-        # Nach Zeilenumbruch splitten, damit keine Wörter zerstört werden
+        # Am besten an einem Zeilenumbruch trennen
         if len(chunk) == maxlen and "\n" in chunk:
             last_n = chunk.rfind("\n")
             if last_n > 0:
@@ -617,14 +617,24 @@ def make_wiki_menu_embed_and_view():
     async def sel_cb(inter: discord.Interaction):
         page = inter.data["values"][0]
         text = pages.get(page, "**Seite leer**")
+        # Text splitten falls zu lang
         parts = split_long_text(text)
         total = len(parts)
-        for i, chunk in enumerate(parts):
-            prefix = f"**{page}**\n" if i == 0 else ""
-            head = f"**Seitenauszug [{i+1}/{total}]**\n" if total > 1 else ""
-            await inter.response.send_message(f"{prefix}{head}{chunk}", ephemeral=True)
+        # Discord Ephemeral: Erste Nachricht via response, Rest via followup!
+        if total > 0:
+            prefix = f"**{page}**\n" if total == 1 else f"**{page}**\n**Seitenauszug [1/{total}]**\n"
+            await inter.response.send_message(f"{prefix}{parts[0]}", ephemeral=True)
+            for i, chunk in enumerate(parts[1:], start=2):
+                head = f"**Seitenauszug [{i}/{total}]**\n"
+                await inter.followup.send(f"{head}{chunk}", ephemeral=True, wait=True)
+        else:
+            await inter.response.send_message(f"**{page}**\n*(leer)*", ephemeral=True)
+        # Menü zurücksetzen
         reset_embed, reset_view = make_wiki_menu_embed_and_view()
-        await inter.message.edit(embed=reset_embed, view=reset_view)
+        try:
+            await inter.message.edit(embed=reset_embed, view=reset_view)
+        except:
+            pass
     sel.callback = sel_cb
     view.add_item(sel)
     return embed, view
