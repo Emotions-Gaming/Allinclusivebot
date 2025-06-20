@@ -689,3 +689,5 @@ async def wiki_undo(interaction: discord.Interaction):
     save_wiki_pages(backup)
     await interaction.response.send_message("Backup wiederhergestellt!", ephemeral=True)
     await update_wiki_menu()
+
+bot.run(DISCORD_TOKEN)
