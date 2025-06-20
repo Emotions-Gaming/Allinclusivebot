@@ -617,14 +617,12 @@ def make_wiki_menu_embed_and_view():
     async def sel_cb(inter: discord.Interaction):
         page = inter.data["values"][0]
         text = pages.get(page, "**Seite leer**")
-        # Text splitten falls zu lang
         parts = split_long_text(text)
         total = len(parts)
         for i, chunk in enumerate(parts):
             prefix = f"**{page}**\n" if i == 0 else ""
             head = f"**Seitenauszug [{i+1}/{total}]**\n" if total > 1 else ""
             await inter.response.send_message(f"{prefix}{head}{chunk}", ephemeral=True)
-        # Menü zurücksetzen
         reset_embed, reset_view = make_wiki_menu_embed_and_view()
         await inter.message.edit(embed=reset_embed, view=reset_view)
     sel.callback = sel_cb
@@ -681,16 +679,41 @@ async def wiki_page(interaction: discord.Interaction):
     except Exception:
         pass
 
-@bot.tree.command(name="wiki_undo", description="Setzt die Wiki-Pages aus dem letzten Backup zurück", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="wiki_undo", description="Stellt eine Backup-Wiki-Seite wieder als Channel her", guild=discord.Object(id=GUILD_ID))
 async def wiki_undo(interaction: discord.Interaction):
     if not is_admin(interaction.user):
         return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     backup = load_wiki_backup()
     if not backup:
         return await interaction.response.send_message("Kein Backup vorhanden.", ephemeral=True)
-    save_wiki_pages(backup)
-    await interaction.response.send_message("Backup wiederhergestellt (nur Daten, keine Channels)!", ephemeral=True)
-    await update_wiki_menu()
+    options = [discord.SelectOption(label=title, value=title) for title in backup]
+    if not options:
+        return await interaction.response.send_message("Backup ist leer.", ephemeral=True)
+    sel = discord.ui.Select(placeholder="Seite wählen...", options=options, max_values=1)
+    view = discord.ui.View(timeout=60)
+    async def sel_cb(inter):
+        page = inter.data["values"][0]
+        text = backup.get(page, "")
+        # Channel erstellen, falls nicht vorhanden
+        guild = interaction.guild
+        chan_name = page.replace(" ", "-")[:30]
+        exists = discord.utils.get(guild.text_channels, name=chan_name)
+        if exists:
+            await inter.response.send_message("Channel existiert bereits!", ephemeral=True)
+            return
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        }
+        ch = await guild.create_text_channel(chan_name, overwrites=overwrites, reason="Wiki-Restore aus Backup")
+        # Text splitten falls zu lang
+        parts = split_long_text(text)
+        for chunk in parts:
+            await ch.send(chunk)
+        await inter.response.send_message(f"Backup-Seite **{page}** wurde als Channel `{chan_name}` wiederhergestellt!", ephemeral=True)
+    sel.callback = sel_cb
+    view.add_item(sel)
+    await interaction.response.send_message("Wähle eine Seite aus dem Backup zum Wiederherstellen:", view=view, ephemeral=True)
 
 @bot.tree.command(name="wiki_edit", description="Bearbeite eine Wiki-Seite per Dropdown", guild=discord.Object(id=GUILD_ID))
 async def wiki_edit(interaction: discord.Interaction):
@@ -712,7 +735,6 @@ async def wiki_edit(interaction: discord.Interaction):
             guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
         }
         chan_name = f"wiki-edit-{page}".replace(" ", "-")[:30]
-        # Vorher evtl. existierenden Temp-Channel für diesen User löschen
         for ch in guild.text_channels:
             if ch.name == chan_name and inter.user in ch.members:
                 await ch.delete()
@@ -762,7 +784,6 @@ async def wiki_delete(interaction: discord.Interaction):
             await inter.response.send_message(f"**{page}** gelöscht.", ephemeral=True)
         else:
             await inter.response.send_message("Seite nicht gefunden.", ephemeral=True)
-        # Menü zurücksetzen
         reset_embed, reset_view = make_wiki_menu_embed_and_view()
         try:
             await interaction.message.edit(embed=reset_embed, view=reset_view)
