@@ -603,11 +603,8 @@ def make_wiki_menu_embed_and_view():
     async def sel_cb(inter: discord.Interaction):
         page = inter.data["values"][0]
         text = pages.get(page, "**Seite leer**")
-        # Privatnachricht als ephemeral Message im Main-Channel
-        await inter.response.send_message(
-            f"**{page}**\n{text}", ephemeral=True
-        )
-        # Dropdown resetten
+        await inter.response.send_message(f"**{page}**\n{text}", ephemeral=True)
+        # Menü zurücksetzen
         reset_embed, reset_view = make_wiki_menu_embed_and_view()
         await inter.message.edit(embed=reset_embed, view=reset_view)
     sel.callback = sel_cb
@@ -659,7 +656,6 @@ async def wiki_page(interaction: discord.Interaction):
     await interaction.response.send_message(f"Seite **{title}** gespeichert und Channel wird gelöscht!", ephemeral=True)
     await update_wiki_menu()
     await asyncio.sleep(2)
-    # Channel löschen
     try:
         await channel.delete(reason="Als Wiki-Seite gespeichert.")
     except Exception:
@@ -675,6 +671,87 @@ async def wiki_undo(interaction: discord.Interaction):
     save_wiki_pages(backup)
     await interaction.response.send_message("Backup wiederhergestellt!", ephemeral=True)
     await update_wiki_menu()
+
+@bot.tree.command(name="wiki_edit", description="Bearbeite eine Wiki-Seite per Dropdown", guild=discord.Object(id=GUILD_ID))
+async def wiki_edit(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    pages = load_wiki_pages()
+    if not pages:
+        return await interaction.response.send_message("Keine Wiki-Seiten vorhanden.", ephemeral=True)
+    options = [discord.SelectOption(label=title, value=title) for title in pages]
+    sel = discord.ui.Select(placeholder="Seite wählen...", options=options, max_values=1)
+    view = discord.ui.View(timeout=60)
+    async def sel_cb(inter):
+        page = inter.data["values"][0]
+        old_text = pages.get(page, "")
+        guild = interaction.guild
+        overwrites = {
+            guild.default_role: discord.PermissionOverwrite(view_channel=False),
+            inter.user: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True),
+            guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True, read_message_history=True)
+        }
+        chan_name = f"wiki-edit-{page}".replace(" ", "-")[:30]
+        # Vorher evtl. existierenden Temp-Channel für diesen User löschen
+        for ch in guild.text_channels:
+            if ch.name == chan_name and inter.user in ch.members:
+                await ch.delete()
+        ch = await guild.create_text_channel(chan_name, overwrites=overwrites, reason="Wiki-Edit")
+        await ch.send(f"**Bearbeite die Wiki-Seite:** `{page}`\n\nAktueller Text:\n```{old_text}```\n\n**Sende jetzt die neue Version als eine Nachricht.**")
+        def check(msg):
+            return msg.channel == ch and msg.author == inter.user and not msg.author.bot
+        try:
+            msg = await bot.wait_for('message', timeout=300, check=check)
+            # Button zum Übernehmen
+            button = discord.ui.Button(label="Speichern & Schließen", style=discord.ButtonStyle.success)
+            async def btn_cb(button_inter):
+                pages2 = load_wiki_pages()
+                pages2[page] = msg.content
+                save_wiki_pages(pages2)
+                await update_wiki_menu()
+                await button_inter.response.send_message("Gespeichert & Channel wird geschlossen.", ephemeral=True)
+                await ch.delete()
+            button.callback = btn_cb
+            v = discord.ui.View(timeout=120)
+            v.add_item(button)
+            await ch.send("Klicke **Speichern & Schließen** zum Übernehmen.", view=v)
+        except asyncio.TimeoutError:
+            await ch.send("Zeit abgelaufen, Channel wird gelöscht.")
+            await asyncio.sleep(2)
+            await ch.delete()
+    sel.callback = sel_cb
+    view.add_item(sel)
+    await interaction.response.send_message("Wähle eine Wiki-Seite zum Bearbeiten:", view=view, ephemeral=True)
+
+@bot.tree.command(name="wiki_delete", description="Löscht eine Wiki-Seite per Dropdown", guild=discord.Object(id=GUILD_ID))
+async def wiki_delete(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    pages = load_wiki_pages()
+    if not pages:
+        return await interaction.response.send_message("Keine Wiki-Seiten vorhanden.", ephemeral=True)
+    options = [discord.SelectOption(label=title, value=title) for title in pages]
+    sel = discord.ui.Select(placeholder="Seite wählen...", options=options, max_values=1)
+    view = discord.ui.View(timeout=60)
+    async def sel_cb(inter):
+        page = inter.data["values"][0]
+        pages2 = load_wiki_pages()
+        if page in pages2:
+            pages2.pop(page)
+            save_wiki_pages(pages2)
+            await update_wiki_menu()
+            await inter.response.send_message(f"**{page}** gelöscht.", ephemeral=True)
+        else:
+            await inter.response.send_message("Seite nicht gefunden.", ephemeral=True)
+        # Menü zurücksetzen
+        reset_embed, reset_view = make_wiki_menu_embed_and_view()
+        try:
+            await interaction.message.edit(embed=reset_embed, view=reset_view)
+        except:
+            pass
+    sel.callback = sel_cb
+    view.add_item(sel)
+    await interaction.response.send_message("Wähle eine Wiki-Seite zum **Löschen**:", view=view, ephemeral=True)
 
 
 # --- Script-Ende für diesen Part ---
