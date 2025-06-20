@@ -396,7 +396,7 @@ async def strikemain(interaction: discord.Interaction):
     view.add_item(sel)
     await interaction.channel.send("Wähle einen User für einen Strike:", view=view)
 
-# --- STRIKELIST CHANNEL FORMAT UND BUTTON CALLBACK ---
+# --- STRIKELIST SCHÖNER FORMAT & BUTTON CALLBACK NUR CHANNEL-EPHEMERAL ---
 async def update_strike_list():
     global strike_list_channel_id
     if not strike_list_channel_id:
@@ -419,7 +419,7 @@ async def update_strike_list():
         uname = user.mention if user else f"<@{uid}>"
         n = len(strike_list)
         btn = discord.ui.Button(label=f"Strikes: {n}", style=discord.ButtonStyle.primary)
-        async def btn_cb(inter, uid=uid, uname=uname):
+        async def btn_cb(inter, uid=uid):
             strikes = load_strikes()
             entrys = strikes.get(uid, [])
             lines = []
@@ -431,7 +431,7 @@ async def update_strike_list():
         btn.callback = btn_cb
         v = discord.ui.View(timeout=None)
         v.add_item(btn)
-        await ch.send(f"{uname}", view=v)
+        await ch.send(f"{uname}\n", view=v)
         await ch.send("-----------------")
 
 @bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
@@ -466,6 +466,23 @@ async def strikeremove(interaction: discord.Interaction, user: discord.Member):
         await interaction.response.send_message(f"Ein Strike für {user.mention} entfernt.", ephemeral=True)
     else:
         await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
+
+# --- NEU: STRIKEVIEW für User ---
+@bot.tree.command(name="strikeview", description="Zeigt dir, wie viele Strikes du hast (nur für dich selbst).", guild=discord.Object(id=GUILD_ID))
+async def strikeview(interaction: discord.Interaction):
+    strikes = load_strikes()
+    user_id = str(interaction.user.id)
+    count = len(strikes.get(user_id, []))
+    try:
+        msg = (
+            f"👮‍♂️ **Strike-Übersicht** für {interaction.user.mention}:\n\n"
+            f"Du hast aktuell **{count} Strike{'s' if count!=1 else ''}**.\n"
+            f"{'Wenn du mehr wissen willst, schreibe dem Bot einfach eine DM.' if count else 'Du hast aktuell keine Strikes.'}"
+        )
+        await interaction.user.send(msg)
+        await interaction.response.send_message("Ich habe dir eine private Nachricht mit deiner Strike-Anzahl geschickt.", ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message("Ich konnte dir leider keine DM schicken. Hast du deine DMs deaktiviert?", ephemeral=True)
 
 # ─── Bot starten ───────────────────────────────────────────────────────────────
 bot.run(DISCORD_TOKEN)
