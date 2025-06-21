@@ -7,6 +7,11 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 
+intents = discord.Intents.default()
+intents.members = True
+intents.presences = True  # Das ist der Knackpunkt!
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 # === ENV + CONFIG ===
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -749,174 +754,187 @@ async def on_ready():
     except Exception as e:
         print(f"Fehler bei der Command-Synchronisierung: {e}")
 
+
+# === SCHICHTÜBERGABE SYSTEM ===
+
 import discord
 from discord.ext import commands
 from discord import app_commands
-import asyncio
 import json
 import os
 
-SCHICHT_FILE = "schicht_settings.json"
+SCHICHT_CONFIG = "schicht_config.json"
+SCHICHT_ROLES_FILE = "schicht_roles.json"
 
-def load_schicht_cfg():
-    if not os.path.exists(SCHICHT_FILE):
-        return {"rollen": [], "voice_id": None, "log_id": None, "channel_id": None}
-    with open(SCHICHT_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+def load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
 
-def save_schicht_cfg(cfg):
-    with open(SCHICHT_FILE, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
-cfg = load_schicht_cfg()
+schicht_config = load_json(SCHICHT_CONFIG, {
+    "text_channel_id": None,
+    "voice_channel_id": None,
+    "log_channel_id": None,
+})
+schicht_roles = set(load_json(SCHICHT_ROLES_FILE, {}).get("role_ids", []))
 
-def is_admin(user):
-    return hasattr(user, "guild_permissions") and user.guild_permissions.administrator
+def save_schicht_config():
+    save_json(SCHICHT_CONFIG, schicht_config)
 
-def member_has_erlaubte_rolle(member):
-    erlaubte = set(cfg.get("rollen", []))
-    return any(r.id in erlaubte for r in member.roles) if erlaubte else True
+def save_schicht_roles():
+    save_json(SCHICHT_ROLES_FILE, {"role_ids": list(schicht_roles)})
 
-def get_erlaubte_members(guild):
-    return [m for m in guild.members if not m.bot and member_has_erlaubte_rolle(m)]
+# Helper: Rollenerlaubnis prüfen
+def member_has_schichtrolle(member):
+    return any(r.id in schicht_roles for r in member.roles)
 
-# ---------- Slash-Commands: Setup ----------
-@bot.tree.command(name="schichtrollen", description="Fügt eine Rolle zu erlaubten Schichtübergabe-Rollen hinzu")
-@app_commands.describe(role="Rolle, die für Schichtübergabe auswählbar ist")
-async def schichtrollen(inter: discord.Interaction, role: discord.Role):
-    if not is_admin(inter.user):
-        return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    if role.id not in cfg["rollen"]:
-        cfg["rollen"].append(role.id)
-        save_schicht_cfg(cfg)
-        await inter.response.send_message(f"Rolle **{role.name}** ist jetzt auswählbar!", ephemeral=True)
+# 1. Schichtübergabe-Textkanal festlegen
+@bot.tree.command(name="schichtwechsel", description="Setzt den Kanal für Schichtübergabe")
+@app_commands.describe(channel="Textkanal für Schichtübergabe")
+async def schichtwechsel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    schicht_config["text_channel_id"] = channel.id
+    save_schicht_config()
+    await interaction.response.send_message(f"Schichtübergabe-Kanal gesetzt: {channel.mention}", ephemeral=True)
+    await post_schicht_info(channel)
+
+# 2. VoiceMaster-Eingangskanal festlegen
+@bot.tree.command(name="schicht_voiceid", description="Setzt den VoiceMaster-Eingangskanal")
+@app_commands.describe(voice_channel="VoiceChannel für Schichtübergabe (VoiceMaster Eingang)")
+async def schicht_voiceid(interaction: discord.Interaction, voice_channel: discord.VoiceChannel):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    schicht_config["voice_channel_id"] = voice_channel.id
+    save_schicht_config()
+    await interaction.response.send_message(f"VoiceMaster-Eingangskanal gesetzt: {voice_channel.mention}", ephemeral=True)
+
+# 3. Schichtlog-Channel setzen
+@bot.tree.command(name="schichtlog", description="Setzt den Log-Kanal für Schichtwechsel")
+@app_commands.describe(channel="Kanal für Logs")
+async def schichtlog(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    schicht_config["log_channel_id"] = channel.id
+    save_schicht_config()
+    await interaction.response.send_message(f"Log-Kanal gesetzt: {channel.mention}", ephemeral=True)
+
+# 4. Rollen erlauben für Übergabe
+@bot.tree.command(name="schichtrollen", description="Fügt eine Rolle als berechtigt für Schichtübergabe hinzu/entfernt")
+@app_commands.describe(role="Rolle erlauben/entfernen", remove="Entfernen (true) oder Hinzufügen (false)")
+async def schichtrollen(interaction: discord.Interaction, role: discord.Role, remove: bool = False):
+    if not interaction.user.guild_permissions.administrator:
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    if remove:
+        schicht_roles.discard(role.id)
+        save_schicht_roles()
+        await interaction.response.send_message(f"Rolle {role.mention} entfernt.", ephemeral=True)
     else:
-        await inter.response.send_message("Rolle war bereits erlaubt.", ephemeral=True)
+        schicht_roles.add(role.id)
+        save_schicht_roles()
+        await interaction.response.send_message(f"Rolle {role.mention} hinzugefügt.", ephemeral=True)
 
-@bot.tree.command(name="schichtrollen_remove", description="Entfernt eine Rolle aus erlaubten Schichtübergabe-Rollen")
-@app_commands.describe(role="Rolle entfernen")
-async def schichtrollen_remove(inter: discord.Interaction, role: discord.Role):
-    if not is_admin(inter.user):
-        return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    if role.id in cfg["rollen"]:
-        cfg["rollen"].remove(role.id)
-        save_schicht_cfg(cfg)
-        await inter.response.send_message(f"Rolle **{role.name}** wurde entfernt.", ephemeral=True)
-    else:
-        await inter.response.send_message("Rolle war nicht freigegeben.", ephemeral=True)
-
-@bot.tree.command(name="schichtvoice", description="Setzt den VoiceMaster-Eingangskanal für Schichtübergabe")
-@app_commands.describe(channel="Voicekanal für Start der Übergabe")
-async def schichtvoice(inter: discord.Interaction, channel: discord.VoiceChannel):
-    if not is_admin(inter.user):
-        return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    cfg["voice_id"] = channel.id
-    save_schicht_cfg(cfg)
-    await inter.response.send_message(f"Voice-Kanal für Schichtübergabe gesetzt: {channel.mention}", ephemeral=True)
-
-@bot.tree.command(name="schichtlog", description="Setzt den Log-Kanal für Schichtübergaben")
-@app_commands.describe(channel="Textkanal für Log")
-async def schichtlog(inter: discord.Interaction, channel: discord.TextChannel):
-    if not is_admin(inter.user):
-        return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    cfg["log_id"] = channel.id
-    save_schicht_cfg(cfg)
-    await inter.response.send_message(f"Log-Kanal für Schichtübergaben gesetzt: {channel.mention}", ephemeral=True)
-
-@bot.tree.command(name="schichtwechsel", description="Setzt den Schichtübergabe-Channel für die Anleitung")
-@app_commands.describe(channel="Textkanal, wo Anleitung angezeigt wird")
-async def schichtwechsel(inter: discord.Interaction, channel: discord.TextChannel):
-    if not is_admin(inter.user):
-        return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    cfg["channel_id"] = channel.id
-    save_schicht_cfg(cfg)
+# 5. Schichtübergabe-Info-Nachricht posten (mit Anleitung und Befehlsbeispiel)
+async def post_schicht_info(channel):
     embed = discord.Embed(
         title="🕒 Schichtübergabe starten",
+        color=discord.Color.blurple(),
         description=(
             "**So funktioniert es:**\n"
-            "• Tippe `/schichtuebergabe nutzer:<name>` in den Chat\n"
-            "• Wähle den gewünschten Nutzer (mit erlaubter Rolle) per Autocomplete aus der Liste\n"
-            "• Fertig! Die Schichtübergabe läuft automatisch ab.\n\n"
+            "• Tippe `/schichtuebergabe nutzer:<Name>` in den Chat\n"
+            "• Wähle den gewünschten Nutzer (mit erlaubter Rolle!) aus\n"
+            "• Fertig! Die Schichtübergabe läuft automatisch ab\n\n"
             "**Der Befehl:**\n"
-            "`/schichtuebergabe nutzer:<name>`\n\n"
-            "> Der Nutzer muss aktuell online sein und eine erlaubte Rolle haben.\n"
-            "> Du musst dich in einem Sprachkanal befinden.\n"
-        ),
-        color=discord.Color.purple()
+            "```/schichtuebergabe nutzer:<Name>```\n"
+            "> Der Nutzer muss aktuell **online** sein und eine erlaubte Rolle haben.\n"
+            "> Du musst dich in einem Sprachkanal befinden."
+        )
     )
     await channel.send(embed=embed)
-    await inter.response.send_message("Schichtübergabe-Anleitung gepostet!", ephemeral=True)
 
-# -------- Autocomplete: async! --------
-async def autocomplete_nutzer(inter: discord.Interaction, current: str):
-    guild = inter.guild
-    if not guild:
-        return []
-    members = get_erlaubte_members(guild)
-    results = []
-    for m in members:
-        if current.lower() in m.display_name.lower() or current.lower() in m.name.lower():
-            results.append(app_commands.Choice(name=m.display_name, value=m.display_name))
-    return results[:25]
-
-# ----------- Slash-Command: Schichtübergabe -----------
+# 6. SCHICHTÜBERGABE-BEFEHL (mit Rollen- und Voice-Prüfung)
 @bot.tree.command(name="schichtuebergabe", description="Starte die Schichtübergabe an einen Nutzer mit Rollen-Filter")
-@app_commands.describe(nutzer="Name des Ziel-Nutzers")
-@app_commands.autocomplete(nutzer=autocomplete_nutzer)
-async def schichtuebergabe(inter: discord.Interaction, nutzer: str):
-    guild = inter.guild
-    allowed = get_erlaubte_members(guild)
-    ziel = None
-    for m in allowed:
-        if m.display_name.lower().startswith(nutzer.lower()) or m.name.lower().startswith(nutzer.lower()):
-            ziel = m
+@app_commands.describe(nutzer="Name, Tag oder Mention des Nutzers für die Übergabe")
+async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
+    # --- Sicherheits-Prüfungen ---
+    guild = interaction.guild
+    if schicht_config.get("voice_channel_id") is None:
+        return await interaction.response.send_message("Kein VoiceMaster-Eingangskanal gesetzt!", ephemeral=True)
+    if schicht_config.get("log_channel_id") is None:
+        return await interaction.response.send_message("Kein Log-Kanal gesetzt!", ephemeral=True)
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        return await interaction.response.send_message("Du musst dich in einem Sprachkanal befinden!", ephemeral=True)
+    
+    # Zielnutzer suchen
+    target = None
+    nutzer_lower = nutzer.lower()
+    for member in guild.members:
+        if member.bot:
+            continue
+        # Checks: Nickname, Username, Tag, Mention
+        if (
+            nutzer_lower in member.display_name.lower()
+            or nutzer_lower in member.name.lower()
+            or nutzer_lower in str(member)
+            or nutzer_lower in f"<@{member.id}>"
+        ):
+            target = member
             break
-    if not ziel:
-        return await inter.response.send_message("❌ Nutzer nicht gefunden oder hat keine erlaubte Rolle.", ephemeral=True)
-    if ziel.id == inter.user.id:
-        return await inter.response.send_message("❌ Du kannst dir selbst keine Schicht übergeben.", ephemeral=True)
-    # Ziel-User online?
-    if ziel.status != discord.Status.online and ziel.status != discord.Status.idle:
-        try:
-            await ziel.send(f"{inter.user.mention} wollte Schicht an dich übergeben – du warst aber offline. Melde dich bitte!")
-            await inter.response.send_message(f"{ziel.mention} ist offline. Er wurde per DM benachrichtigt.", ephemeral=True)
-        except Exception:
-            await inter.response.send_message("Nutzer hat DMs deaktiviert – bitte kontaktiere ihn persönlich.", ephemeral=True)
-        return
-    # Voice-Prüfung
-    if not inter.user.voice or not inter.user.voice.channel:
-        return await inter.response.send_message("Du musst in einem Sprachkanal sein, um die Schichtübergabe zu starten.", ephemeral=True)
-    if not cfg.get("voice_id"):
-        return await inter.response.send_message("Kein VoiceMaster-Eingangskanal gesetzt. `/schichtvoice`!", ephemeral=True)
-    try:
-        vm_chan = guild.get_channel(cfg["voice_id"])
-        await inter.user.move_to(vm_chan)
-    except Exception:
-        return await inter.response.send_message("Kann dich nicht in den VoiceMaster-Channel moven!", ephemeral=True)
-    await inter.response.send_message(f"Du wurdest in den VoiceMaster-Eingang gemoved. Warte kurz auf {ziel.display_name}...", ephemeral=True)
-    await asyncio.sleep(5)
-    neu_chan = inter.user.voice.channel if inter.user.voice else None
-    try:
-        await ziel.move_to(neu_chan)
-    except Exception:
-        await inter.followup.send(f"Konnte {ziel.display_name} nicht in den neuen Kanal moven.", ephemeral=True)
-        return
-    # Log-Eintrag
-    if cfg.get("log_id"):
-        logch = guild.get_channel(cfg["log_id"])
-        if logch:
-            await logch.send(f"✅ Schichtübergabe von **{inter.user.mention}** an **{ziel.mention}** abgeschlossen.")
-    await inter.followup.send(f"✅ Schichtübergabe an {ziel.display_name} abgeschlossen!", ephemeral=True)
+    if not target:
+        return await interaction.response.send_message("Nutzer nicht gefunden. Bitte überprüfe die Eingabe.", ephemeral=True)
+    if target == interaction.user:
+        return await interaction.response.send_message("Du kannst dich nicht selbst auswählen.", ephemeral=True)
+    if not member_has_schichtrolle(target):
+        return await interaction.response.send_message(f"{target.mention} hat keine erlaubte Rolle für die Schichtübergabe.", ephemeral=True)
 
-# ---------- Bot Startup ----------
-@bot.event
-async def on_ready():
+    # --- Ist Ziel-Nutzer im Sprachkanal? ---
+    # Sonderfall: Nutzer ist DEAFENED, aber im Voice!
+    target_in_voice = target.voice and target.voice.channel is not None
+
+    if not target_in_voice:
+        # Versuch, DM zu schicken
+        try:
+            await target.send(f"{interaction.user.mention} wollte dir eine Schicht übergeben, aber du bist aktuell nicht im Sprachkanal!\nMelde dich ASAP.")
+            await interaction.response.send_message(
+                f"{target.mention} ist **nicht im Sprachkanal** (evtl. offline). Ich habe eine DM geschickt.", ephemeral=True
+            )
+        except:
+            await interaction.response.send_message(
+                f"{target.mention} ist nicht erreichbar (keine DMs möglich). Bitte selbst kontaktieren.", ephemeral=True
+            )
+        return
+
+    # --- Moven ---
+    vc_id = schicht_config.get("voice_channel_id")
     try:
-        await bot.tree.sync()
-        print("Slash-Commands synchronisiert!")
+        # Move: Anfrage-Steller zuerst in VoiceMaster-Eingangskanal
+        vc = guild.get_channel(vc_id)
+        await interaction.user.move_to(vc)
+        await interaction.response.send_message(f"{target.mention} wird gleich für die Schichtübergabe zu dir verschoben...", ephemeral=True)
+        # Warte, bis der Channel ggf. "geclont" wurde (für temporäre Channels)
+        await asyncio.sleep(5)
+        # Dann move target in den Channel, in dem der Interaktionsuser jetzt ist
+        new_channel = interaction.user.voice.channel if interaction.user.voice else vc
+        await target.move_to(new_channel)
     except Exception as e:
-        print("Sync Fehler:", e)
-    print(f"Bot online als {bot.user}")
+        return await interaction.response.send_message(f"Fehler beim Verschieben: {e}", ephemeral=True)
+
+    # Log
+    log_channel = guild.get_channel(schicht_config["log_channel_id"])
+    embed = discord.Embed(
+        title="Schichtwechsel durchgeführt",
+        color=discord.Color.green(),
+        description=f"{interaction.user.mention} → {target.mention}\nSchichtübergabe erfolgreich ausgeführt."
+    )
+    await log_channel.send(embed=embed)
+
+# --- ENDE SCHICHTSYSTEM ---
 
 
 # =================== RAILWAY-PERSISTENZ/LOADER ====================
