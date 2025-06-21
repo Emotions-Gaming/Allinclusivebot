@@ -18,8 +18,8 @@ class Schicht(commands.Cog):
         })
         self.schicht_rights = set(load_json(SCHICHT_RIGHTS_FILE, []))
 
-    # ========== Rollen für Zielnutzer-Filter (Schichtrollen) ==========
-    @app_commands.command(name="schichtaddrole", description="Fügt eine Rolle als Schichtrolle (Ziel für Übergabe) hinzu")
+    # ===== Schichtrollen verwalten =====
+    @app_commands.command(name="schichtaddrole", description="Fügt eine Rolle als Schichtrolle hinzu")
     @app_commands.describe(role="Discord-Rolle, die als Ziel für Schichtübergabe auswählbar sein soll")
     async def schichtaddrole(self, interaction: discord.Interaction, role: discord.Role):
         if not is_admin(interaction.user):
@@ -43,32 +43,7 @@ class Schicht(commands.Cog):
         else:
             await interaction.response.send_message(f"Rolle {role.mention} war keine Schichtrolle.", ephemeral=True)
 
-    # ================== Schichtinfo posten =====================
-    @app_commands.command(name="schichtinfo", description="Postet Hinweise zur Schichtübergabe")
-    async def schichtinfo(self, interaction: discord.Interaction):
-        rollen_names = []
-        guild = interaction.guild
-        for rid in self.schicht_cfg.get("rollen", []):
-            r = guild.get_role(rid)
-            if r:
-                rollen_names.append(r.mention)
-        rollen_txt = ", ".join(rollen_names) if rollen_names else "*(noch keine Schichtrollen definiert)*"
-        embed = discord.Embed(
-            title="👮‍♂️ Schichtübergabe – Hinweise",
-            description=(
-                "Mit `/schichtuebergabe [Nutzer]` kannst du die Schicht gezielt übergeben.\n"
-                "**Ablauf:**\n"
-                "1. Nutze den Command, während du im Voice bist\n"
-                "2. Der neue Nutzer muss im Discord & Voice-Channel online sein\n"
-                "3. Beide werden gemeinsam in den VoiceMaster-Kanal verschoben\n"
-                "4. Ab jetzt läuft die Übergabe – ggf. relevante Infos im Chat posten!\n"
-                f"**Aktuelle Schichtrollen:** {rollen_txt}"
-            ),
-            color=discord.Color.blue()
-        )
-        await interaction.response.send_message(embed=embed)
-
-    # ================== Rechte für Schichtübergabe steuern =====================
+    # ===== Rechte verwalten =====
     @app_commands.command(name="schichtrolerights", description="Fügt eine Rolle als berechtigt für Schichtübergabe hinzu")
     @app_commands.describe(role="Rolle, die den Befehl ausführen darf")
     async def schichtrolerights(self, interaction: discord.Interaction, role: discord.Role):
@@ -90,10 +65,54 @@ class Schicht(commands.Cog):
         else:
             await interaction.response.send_message(f"Rolle {role.mention} war nicht berechtigt.", ephemeral=True)
 
-    # ================== Schichtübergabe an Nutzer =====================
+    # ===== Logchannel setzen =====
+    @app_commands.command(name="schichtlog", description="Setzt den Log-Channel für Schichtübergaben")
+    @app_commands.describe(channel="Textkanal für Schicht-Logs")
+    async def schichtlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        self.schicht_cfg["log_channel_id"] = channel.id
+        save_json(SCHICHT_CONFIG_FILE, self.schicht_cfg)
+        await interaction.response.send_message(f"Log-Channel gesetzt: {channel.mention}", ephemeral=True)
 
+    # ===== VoiceMaster-Eingangskanal setzen =====
+    @app_commands.command(name="schichtsetvoice", description="Setzt den VoiceMaster-Eingangskanal")
+    @app_commands.describe(channel="Voice-Kanal für Schichtübergabe")
+    async def schichtsetvoice(self, interaction: discord.Interaction, channel: discord.VoiceChannel):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        self.schicht_cfg["voice_channel_id"] = channel.id
+        save_json(SCHICHT_CONFIG_FILE, self.schicht_cfg)
+        await interaction.response.send_message(f"VoiceMaster-Kanal gesetzt: {channel.mention}", ephemeral=True)
+
+    # ===== Schichtinfo posten =====
+    @app_commands.command(name="schichtinfo", description="Postet Hinweise zur Schichtübergabe")
+    async def schichtinfo(self, interaction: discord.Interaction):
+        rollen_names = []
+        guild = interaction.guild
+        for rid in self.schicht_cfg.get("rollen", []):
+            r = guild.get_role(rid)
+            if r:
+                rollen_names.append(r.mention)
+        rollen_txt = ", ".join(rollen_names) if rollen_names else "*(noch keine Schichtrollen definiert)*"
+        embed = discord.Embed(
+            title="👮‍♂️ Schichtübergabe – Hinweise",
+            description=(
+                "Mit `/schichtuebergabe [Nutzer]` kannst du die Schicht gezielt übergeben.\n"
+                "**Ablauf:**\n"
+                "1. Nutze den Command, während du im Voice bist\n"
+                "2. Der neue Nutzer muss im Discord & Voice-Channel online sein\n"
+                "3. Beide werden gemeinsam in den VoiceMaster-Kanal verschoben\n"
+                "4. Ab jetzt läuft die Übergabe – ggf. relevante Infos im Chat posten!\n"
+                f"**Aktuelle Schichtrollen:** {rollen_txt}\n"
+                "Verwalte Zielrollen mit `/schichtaddrole` und `/schichtremoverole`."
+            ),
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed)
+
+    # ===== Autocomplete für Schichtübergabe: zeigt NUR User mit Schichtrolle =====
     async def schicht_user_autocomplete(self, interaction: discord.Interaction, current: str):
-        # Nur User, die eine der Schichtrollen haben, im Dropdown anzeigen!
         rollen = set(self.schicht_cfg.get("rollen", []))
         allowed = []
         for m in interaction.guild.members:
@@ -106,6 +125,7 @@ class Schicht(commands.Cog):
             if len(allowed) >= 20: break
         return allowed
 
+    # ===== Schichtübergabe an Nutzer =====
     @app_commands.command(name="schichtuebergabe", description="Starte die Schichtübergabe an einen Nutzer mit Rollen-Filter")
     @app_commands.describe(nutzer="Nutzer für Übergabe")
     @app_commands.autocomplete(nutzer=schicht_user_autocomplete)
@@ -119,13 +139,10 @@ class Schicht(commands.Cog):
         user = guild.get_member(int(nutzer))
         if not user:
             return await interaction.response.send_message("Nutzer nicht gefunden.", ephemeral=True)
-        # Check: Hat user die richtige Rolle?
         if not any(r.id in rollen for r in user.roles):
             return await interaction.response.send_message(f"{user.display_name} hat nicht die berechtigte Rolle.", ephemeral=True)
-        # Check: Fragender im Voice?
         if not interaction.user.voice or not interaction.user.voice.channel:
             return await interaction.response.send_message("Du musst in einem Sprachkanal sein!", ephemeral=True)
-        # Check: Zielnutzer im Voice?
         if not user.voice or not user.voice.channel:
             try:
                 await user.send(f"**{interaction.user.display_name}** möchte dir die Schicht übergeben, aber du bist nicht im Sprachkanal! Bitte geh online und join einem Channel.")
