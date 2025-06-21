@@ -11,11 +11,11 @@ Ein multifunktionaler Discord-Bot für Community- und Teammanagement.
 
 Lege folgende Variablen im Railway-Dashboard (_Deployments → Variables_) an:
 
-```env
+
 DISCORD_TOKEN=dein_discord_bot_token
 GOOGLE_API_KEY=dein_gemini_google_api_key
 GUILD_ID=deine_guild_id  # Als Zahl! Beispiel: 1249813174731931740
-** ```
+
 
 Alternativ für lokalen Betrieb:
 .env-Datei mit denselben Werten (wird automatisch geladen, niemals committen!)
