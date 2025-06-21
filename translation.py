@@ -5,7 +5,8 @@ import aiohttp
 import asyncio
 import os
 
-from utils import load_json, save_json, is_admin
+from utils import load_json, save_json, is_admin, has_role, has_any_role, mention_roles, get_member_by_id
+
 
 # ---------- Konstanten ---------- #
 PROFILES_FILE   = "profiles.json"
