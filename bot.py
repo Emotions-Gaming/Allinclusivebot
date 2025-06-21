@@ -297,274 +297,189 @@ async def translatorpromptdelete(interaction: discord.Interaction):
     save_json(PROMPT_FILE, {"addition": ""})
     await interaction.response.send_message("Prompt-Erweiterung entfernt.", ephemeral=True)
 
-# STRIKE SYSTEM MIT MODAL FÜR GRUND/BILD – SICHER UND UNBEGRENZTE USER
+# ───── SCHICHTÜBERGABE SYSTEM ──────────────────────────────────────────────────────────────
 
-import json
-import datetime
-import discord
-from discord import app_commands
+SCHICHT_CONFIG_FILE = "schicht_config.json"
 
-GUILD_ID = 1249813174731931740  # Deine Server-ID
-
-STRIKE_FILE        = "strike_data.json"
-STRIKE_LIST_FILE   = "strike_list.json"
-STRIKE_ROLES_FILE  = "strike_roles.json"
-STRIKE_AUTOROLE_FILE = "strike_autorole.json"
-
-def load_json(path, default):
+def load_schicht_cfg():
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(SCHICHT_CONFIG_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return default
+        return {}
 
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
+def save_schicht_cfg(data):
+    with open(SCHICHT_CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-def is_admin(user):
-    return user.guild_permissions.administrator or getattr(user, "id", None) == getattr(getattr(user, "guild", None), "owner_id", None)
+schicht_cfg = load_schicht_cfg()
+schicht_channel_id = schicht_cfg.get("channel_id")
+schicht_voicemaster_id = schicht_cfg.get("voicemaster_id")
+schicht_log_id = schicht_cfg.get("log_id")
+schicht_allowed_roles = set(schicht_cfg.get("allowed_roles", []))
 
-def has_strike_role(user):
-    strike_roles = set(load_json(STRIKE_ROLES_FILE, {}).get("role_ids", []))
-    return any(r.id in strike_roles for r in getattr(user, "roles", [])) or is_admin(user)
+# Hilfsfunktion: Rechtecheck für Schichtübergabe (Admin oder erlaubte Rolle)
+def is_schicht_admin(user):
+    if hasattr(user, "guild_permissions") and user.guild_permissions.administrator:
+        return True
+    if hasattr(user, "id") and user.id == bot.owner_id:
+        return True
+    return False
 
-def load_strikes():
-    return load_json(STRIKE_FILE, {})
+def has_schicht_role(user):
+    return any(r.id in schicht_allowed_roles for r in user.roles) or is_schicht_admin(user)
 
-def save_strikes(data):
-    save_json(STRIKE_FILE, data)
+# Befehl: Schicht-Kanal festlegen
+@bot.tree.command(name="schichtwechsel", description="Setzt den Schichtwechsel-Channel", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Text-Channel für Schichtwechsel")
+async def schichtwechsel(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_schicht_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    global schicht_channel_id
+    schicht_channel_id = channel.id
+    schicht_cfg["channel_id"] = schicht_channel_id
+    save_schicht_cfg(schicht_cfg)
+    await interaction.response.send_message(f"Schichtwechsel-Channel gesetzt: {channel.mention}", ephemeral=True)
+    await post_schicht_info()
 
-def load_strike_roles():
-    return set(load_json(STRIKE_ROLES_FILE, {}).get("role_ids", []))
+# Befehl: VoiceMaster Eingangskanal festlegen
+@bot.tree.command(name="schichtvoiceid", description="Setzt den Eingangskanal für VoiceMaster", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(voice_id="Channel-ID für VoiceMaster-Eingang")
+async def schichtvoiceid(interaction: discord.Interaction, voice_id: str):
+    if not is_schicht_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    global schicht_voicemaster_id
+    schicht_voicemaster_id = int(voice_id)
+    schicht_cfg["voicemaster_id"] = schicht_voicemaster_id
+    save_schicht_cfg(schicht_cfg)
+    await interaction.response.send_message(f"VoiceMaster-Eingangskanal gesetzt: `{voice_id}`", ephemeral=True)
 
-def save_strike_roles(role_ids):
-    save_json(STRIKE_ROLES_FILE, {"role_ids": list(role_ids)})
+# Befehl: Log-Channel festlegen
+@bot.tree.command(name="schichtlog", description="Setzt den Log-Channel für Schichtübergaben", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Text-Channel für Schicht-Logs")
+async def schichtlog(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_schicht_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    global schicht_log_id
+    schicht_log_id = channel.id
+    schicht_cfg["log_id"] = schicht_log_id
+    save_schicht_cfg(schicht_cfg)
+    await interaction.response.send_message(f"Schicht-Log-Channel gesetzt: {channel.mention}", ephemeral=True)
 
-def load_strike_list_cfg():
-    return load_json(STRIKE_LIST_FILE, {})
+# Rollen erlauben/entfernen
+@bot.tree.command(name="schichtrollen", description="Erlaubt eine Rolle für Schichtübergabe", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(role="Rolle für Schichtübergabe freischalten")
+async def schichtrollen(interaction: discord.Interaction, role: discord.Role):
+    if not is_schicht_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    schicht_allowed_roles.add(role.id)
+    schicht_cfg["allowed_roles"] = list(schicht_allowed_roles)
+    save_schicht_cfg(schicht_cfg)
+    await interaction.response.send_message(f"Rolle {role.mention} kann jetzt als Ziel gewählt werden.", ephemeral=True)
 
-def save_strike_list_cfg(data):
-    save_json(STRIKE_LIST_FILE, data)
+@bot.tree.command(name="schichtrollenremove", description="Entfernt eine erlaubte Rolle", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(role="Rolle für Schichtübergabe entfernen")
+async def schichtrollenremove(interaction: discord.Interaction, role: discord.Role):
+    if not is_schicht_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    if role.id in schicht_allowed_roles:
+        schicht_allowed_roles.remove(role.id)
+        schicht_cfg["allowed_roles"] = list(schicht_allowed_roles)
+        save_schicht_cfg(schicht_cfg)
+        await interaction.response.send_message(f"Rolle {role.mention} ist entfernt.", ephemeral=True)
+    else:
+        await interaction.response.send_message(f"Rolle {role.mention} war nicht freigeschaltet.", ephemeral=True)
 
-def load_autorole():
-    return load_json(STRIKE_AUTOROLE_FILE, {}).get("role_id", None)
-
-def save_autorole(role_id):
-    save_json(STRIKE_AUTOROLE_FILE, {"role_id": role_id})
-
-async def update_strike_list(guild):
-    strike_list_cfg = load_strike_list_cfg()
-    ch_id = strike_list_cfg.get("channel_id")
-    if not ch_id:
+# Die Haupt-Info/Botnachricht im Schicht-Channel posten
+async def post_schicht_info():
+    if not schicht_channel_id:
         return
-    ch = guild.get_channel(ch_id)
+    ch = bot.get_channel(schicht_channel_id)
     if not ch:
         return
-    strikes = load_strikes()
-    # Bestehende Bot-Nachrichten löschen
-    async for msg in ch.history(limit=100):
-        if msg.author == guild.me:
-            await msg.delete()
-    if not strikes:
-        await ch.send("⚡️ Aktuell keine Strikes.")
-        return
-    await ch.send("Strikeliste\n-----------------")
-    for uid, strike_list in strikes.items():
-        if not strike_list:
-            continue
-        user = ch.guild.get_member(int(uid))
-        uname = user.mention if user else f"<@{uid}>"
-        n = len(strike_list)
-        btn = discord.ui.Button(label=f"Strikes: {n}", style=discord.ButtonStyle.primary)
-        async def btn_cb(inter, uid=uid):
-            strikes = load_strikes()
-            entrys = strikes.get(uid, [])
-            lines = []
-            for i, entry in enumerate(entrys, 1):
-                s = f"{i}. {entry['reason']} | {entry['image']}" if entry['image'] else f"{i}. {entry['reason']}"
-                lines.append(s)
-            msg_txt = f"{uname} hat folgende Strikes =>\n" + "\n".join(lines)
-            # Wenn zu lang, splitten
-            while len(msg_txt) > 1900:
-                await inter.response.send_message(msg_txt[:1900], ephemeral=True)
-                msg_txt = msg_txt[1900:]
-            await inter.response.send_message(msg_txt, ephemeral=True)
-        btn.callback = btn_cb
-        v = discord.ui.View(timeout=None)
-        v.add_item(btn)
-        await ch.send(f"{uname}\n", view=v)
-        await ch.send("-----------------")
-
-# ----- STRIKE SLASH-COMMANDS -----
-
-@bot.tree.command(name="strikemaininfo", description="Strike-Info für Teamleads/Mods posten", guild=discord.Object(id=GUILD_ID))
-async def strikemaininfo(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     embed = discord.Embed(
-        title="🛑 Strike System – Vergabe von Strikes",
+        title="⏰ Schichtübergabe starten",
         description=(
-            "Vergib Strikes jetzt mit `/strikegive` direkt an einen Nutzer!\n"
-            "Nach der Auswahl öffnet sich ein Fenster für Grund und Bildlink.\n\n"
-            "**Nur Teamleads/Admins** können Strikes vergeben."
+            "**So funktioniert es:**\n"
+            "• Tippe `/schichtuebergabe nutzer:<name>` in den Chat\n"
+            "• Wähle den gewünschten Nutzer (mit passender Rolle!) aus der Liste aus\n"
+            "• Fertig! Die Schichtübergabe läuft automatisch ab.\n\n"
+            "**Der Befehl:**\n"
+            "```/schichtuebergabe nutzer:<name>```\n"
+            "_Der Nutzer muss aktuell in einem Sprachkanal sein und eine erlaubte Rolle haben._\n"
+            "_Du musst dich in einem Sprachkanal befinden._"
         ),
-        color=discord.Color.red()
+        color=discord.Color.purple()
     )
-    await interaction.channel.send(embed=embed)
-    await interaction.response.send_message("Strike-Hinweis für Mods/Admins gepostet!", ephemeral=True)
+    await ch.send(embed=embed)
 
-@bot.tree.command(name="strikegive", description="Vergibt einen Strike an einen User", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User der einen Strike bekommt")
-async def strikegive(interaction: discord.Interaction, user: discord.Member):
-    if not has_strike_role(interaction.user):
-        return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
-    # MODAL
-    class StrikeModal(discord.ui.Modal, title="Strike vergeben"):
-        reason = discord.ui.TextInput(label="Grund für Strike", style=discord.TextStyle.long, required=True, max_length=256)
-        image = discord.ui.TextInput(label="Bild-Link (optional)", style=discord.TextStyle.short, required=False, max_length=256)
-        async def on_submit(self, modal_inter: discord.Interaction):
-            strikes = load_strikes()
-            entry = {
-                "reason": self.reason.value,
-                "image": self.image.value,
-                "by": interaction.user.display_name,
-                "timestamp": datetime.datetime.now().isoformat(timespec="seconds")
-            }
-            strikes.setdefault(str(user.id), []).append(entry)
-            save_strikes(strikes)
-            strike_count = len(strikes[str(user.id)])
-            # ---- Strike DM je nach Anzahl ----
-            msg = ""
-            if strike_count == 1:
-                msg = (
-                    f"Du hast einen **Strike** bekommen wegen:\n```{self.reason.value}```"
-                    f"{f'\n\nBild: {self.image.value}' if self.image.value else ''}\n"
-                    "\nBitte melde dich bei einem Operation Lead!"
-                )
-            elif strike_count == 2:
-                msg = (
-                    f"Du hast jetzt schon deinen **2ten Strike** bekommen, schau dir die Regeln nochmal an.\n"
-                    f"Du hast ihn erhalten:\n```{self.reason.value}```"
-                    f"{f'\n\nBild: {self.image.value}' if self.image.value else ''}\n"
-                    "\nMeld dich bei einem Teamlead um darüber zu sprechen!"
-                )
-            else:
-                msg = (
-                    f"Es ist soweit... du hast deinen **3ten Strike** gesammelt...\n"
-                    f"```{self.reason.value}```"
-                    f"{f'\n\nBild: {self.image.value}' if self.image.value else ''}\n"
-                    "Jetzt muss leider eine Bestrafung folgen, darum melde dich schnellstmöglich bei einem TeamLead."
-                )
-                # Auto-Role beim 3. Strike
-                auto_role_id = load_autorole()
-                if auto_role_id:
-                    role = interaction.guild.get_role(auto_role_id)
-                    if role:
-                        await user.add_roles(role, reason="Automatisch zugewiesen nach 3 Strikes.")
-            try:
-                await user.send(msg)
-            except Exception:
-                pass
-            await modal_inter.response.send_message(f"Strike für {user.mention} vergeben und DM gesendet! (Strike-Zahl: {strike_count})", ephemeral=True)
-            await update_strike_list(interaction.guild)
-    await interaction.response.send_modal(StrikeModal())
+# Befehl: Schichtübergabe durchführen
+@bot.tree.command(name="schichtuebergabe", description="Starte eine Schichtübergabe", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(nutzer="Discord-Benutzername (autocomplete möglich)")
+async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
+    # Prüfe, ob User die Berechtigung hat (Admin, allowed Role)
+    if not has_schicht_role(interaction.user):
+        return await interaction.response.send_message("Du hast keine Berechtigung für die Schichtübergabe.", ephemeral=True)
 
-# --- Rest: Rollen, Liste, Delete, Remove, View (wie oben) ---
+    # Prüfe, ob User selbst in einem Sprachkanal ist
+    if not interaction.user.voice or not interaction.user.voice.channel:
+        return await interaction.response.send_message("Du musst dich in einem Sprachkanal befinden!", ephemeral=True)
 
-@bot.tree.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(channel="Channel für Strikes")
-async def strikelist(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    save_strike_list_cfg({"channel_id": channel.id})
-    await interaction.response.send_message(f"Strike-Übersicht wird jetzt hier gepostet: {channel.mention}", ephemeral=True)
-    await update_strike_list(interaction.guild)
-
-@bot.tree.command(name="strikerole", description="Fügt eine Rolle zu den Strike-Berechtigten hinzu", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikerole(interaction: discord.Interaction, role: discord.Role):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    strike_roles = load_strike_roles()
-    strike_roles.add(role.id)
-    save_strike_roles(strike_roles)
-    await interaction.response.send_message(f"Rolle **{role.name}** ist jetzt Strike-Berechtigt.", ephemeral=True)
-
-@bot.tree.command(name="strikerole_remove", description="Entfernt eine Rolle von den Strike-Berechtigten", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Discord Rolle")
-async def strikerole_remove(interaction: discord.Interaction, role: discord.Role):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    strike_roles = load_strike_roles()
-    if role.id in strike_roles:
-        strike_roles.remove(role.id)
-        save_strike_roles(strike_roles)
-        await interaction.response.send_message(f"Rolle **{role.name}** ist **nicht mehr** Strike-Berechtigt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
-
-@bot.tree.command(name="strikeaddrole", description="Setzt die automatische Rolle beim 3. Strike", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Rolle für automatisches Vergeben beim 3. Strike")
-async def strikeaddrole(interaction: discord.Interaction, role: discord.Role):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    save_autorole(role.id)
-    await interaction.response.send_message(f"Die Rolle {role.mention} wird beim 3. Strike automatisch vergeben.", ephemeral=True)
-
-@bot.tree.command(name="strikeaddrole_remove", description="Entfernt die automatische Strike-Rolle", guild=discord.Object(id=GUILD_ID))
-async def strikeaddrole_remove(interaction: discord.Interaction):
-    if not is_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    save_autorole(None)
-    await interaction.response.send_message("Die automatische Strike-Rolle wurde entfernt.", ephemeral=True)
-
-@bot.tree.command(name="strikedelete", description="Alle Strikes von User entfernen", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User zum Löschen")
-async def strikedelete(interaction: discord.Interaction, user: discord.Member):
-    if not has_strike_role(interaction.user):
-        return await interaction.response.send_message("Du hast keine Berechtigung!", ephemeral=True)
-    strikes = load_strikes()
-    if str(user.id) in strikes:
-        strikes.pop(str(user.id))
-        save_strikes(strikes)
-        await update_strike_list(interaction.guild)
-        await interaction.response.send_message(f"Alle Strikes für {user.mention} entfernt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
-
-@bot.tree.command(name="strikeremove", description="Entfernt einen Strike", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(user="User für Strike-Abbau")
-async def strikeremove(interaction: discord.Interaction, user: discord.Member):
-    if not has_strike_role(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    strikes = load_strikes()
-    entrys = strikes.get(str(user.id), [])
-    if entrys:
-        entrys.pop()
-        if not entrys:
-            strikes.pop(str(user.id))
-        else:
-            strikes[str(user.id)] = entrys
-        save_strikes(strikes)
-        await update_strike_list(interaction.guild)
-        await interaction.response.send_message(f"Ein Strike für {user.mention} entfernt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
-
-@bot.tree.command(name="strikeview", description="Zeigt dir, wie viele Strikes du hast (privat)", guild=discord.Object(id=GUILD_ID))
-async def strikeview(interaction: discord.Interaction):
-    strikes = load_strikes()
-    user_id = str(interaction.user.id)
-    count = len(strikes.get(user_id, []))
-    msg = (
-        f"👮‍♂️ **Strike-Übersicht** für {interaction.user.mention}:\n\n"
-        f"Du hast aktuell **{count} Strike{'s' if count!=1 else ''}**.\n"
-        f"{'Wenn du mehr wissen willst, schreibe dem Bot einfach eine DM.' if count else 'Du hast aktuell keine Strikes.'}"
+    # Finde den Ziel-User
+    target = discord.utils.find(
+        lambda m: m.display_name.lower() == nutzer.lower() or m.name.lower() == nutzer.lower(), interaction.guild.members
     )
-    await interaction.response.send_message(msg, ephemeral=True)
+    if not target:
+        return await interaction.response.send_message(f"Nutzer `{nutzer}` nicht gefunden.", ephemeral=True)
+    if target.bot:
+        return await interaction.response.send_message("Bots können nicht als Ziel gewählt werden!", ephemeral=True)
+    if not any(r.id in schicht_allowed_roles for r in target.roles):
+        return await interaction.response.send_message(f"{target.mention} hat keine erlaubte Rolle für die Schichtübergabe!", ephemeral=True)
+    # Prüfe, ob Ziel im Voice ist
+    if not target.voice or not target.voice.channel:
+        # Versuch, DM zu schicken
+        try:
+            await target.send(f"{interaction.user.mention} möchte dir die Schicht übergeben! Komm bitte ASAP online/in den Sprachkanal.")
+            await interaction.response.send_message(
+                f"{target.mention} ist nicht im Sprachkanal. Er wurde per DM benachrichtigt.", ephemeral=True)
+        except Exception:
+            await interaction.response.send_message(
+                f"{target.mention} ist nicht im Sprachkanal **und** hat DMs deaktiviert – bitte kontaktiere ihn persönlich.",
+                ephemeral=True)
+        return
 
-# --- Ende Strike-System ---
+    # Starte den Move-Prozess
+    voicemaster_channel = bot.get_channel(schicht_voicemaster_id) if schicht_voicemaster_id else None
+    if not voicemaster_channel:
+        return await interaction.response.send_message("VoiceMaster-Eingangskanal ist nicht gesetzt.", ephemeral=True)
+    # Move den anfragenden User in den Eingangskanal (VoiceMaster)
+    try:
+        await interaction.user.move_to(voicemaster_channel)
+        await interaction.response.send_message(
+            f"{interaction.user.mention} wird in den VoiceMaster-Eingang verschoben, Schichtübergabe läuft!", ephemeral=True)
+        await asyncio.sleep(5)  # Warten bis temporärer Channel erstellt wird
+        # Finde den Channel, in dem der anfragende User jetzt sitzt (könnte neu sein)
+        after_channel = interaction.user.voice.channel
+        await target.move_to(after_channel)
+        # Log-Eintrag
+        if schicht_log_id:
+            logch = bot.get_channel(schicht_log_id)
+            if logch:
+                await logch.send(f"**Schichtwechsel**: {interaction.user.mention} → {target.mention} ✅ (Voice: {after_channel.name})")
+    except Exception as e:
+        await interaction.followup.send(f"Fehler beim Verschieben: {e}", ephemeral=True)
+
+# Beim Bot-Start ggf. Info-Nachricht erneut posten
+@bot.event
+async def on_ready():
+    global schicht_cfg, schicht_channel_id, schicht_voicemaster_id, schicht_log_id, schicht_allowed_roles
+    schicht_cfg = load_schicht_cfg()
+    schicht_channel_id = schicht_cfg.get("channel_id")
+    schicht_voicemaster_id = schicht_cfg.get("voicemaster_id")
+    schicht_log_id = schicht_cfg.get("log_id")
+    schicht_allowed_roles = set(schicht_cfg.get("allowed_roles", []))
+    await post_schicht_info()
+
 
 
 WIKI_PAGES_FILE = "wiki_pages.json"
