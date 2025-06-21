@@ -568,49 +568,57 @@ async def strikeview(interaction: discord.Interaction):
 
 # ───── WIKI SYSTEM (final mit DM-Backup an Admin) ──────────────────────────────
 
+# ====================== WIKI SYSTEM ==============================
+import os
+import json
+import discord
+from discord import app_commands
+
 WIKI_DATA_FILE = "wiki_pages.json"
 WIKI_BACKUP_FILE = "wiki_backup.json"
-
-def load_wiki_pages():
-    try:
-        with open(WIKI_DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_wiki_pages(data):
-    with open(WIKI_DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-def load_wiki_backup():
-    try:
-        with open(WIKI_BACKUP_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except:
-        return {}
-
-def save_wiki_backup(data):
-    with open(WIKI_BACKUP_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-
-wiki_pages = load_wiki_pages()
-wiki_backup = load_wiki_backup()
+wiki_pages = {}
+wiki_backup = {}
 wiki_main_channel_id = None
 
-# WIKI MAIN-CHANNEL SETZEN
-@bot.tree.command(name="wikimain", description="Setzt den Hauptkanal für Wiki-Dropdown", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(channel="Textkanal für Wiki-Menü")
+# --------- Daten laden & speichern (bleibt erhalten bei Railway, wenn im Volume/Root!) ----
+def load_json(path, default):
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return default
+
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+wiki_pages = load_json(WIKI_DATA_FILE, {})
+wiki_backup = load_json(WIKI_BACKUP_FILE, {})
+
+def backup_all_pages():
+    """Sichere alle Wiki-Seiten ins Backup (nur einmal beim Start oder mit /wiki_backup)."""
+    for title, content in wiki_pages.items():
+        wiki_backup[title] = content
+    save_json(WIKI_BACKUP_FILE, wiki_backup)
+
+backup_all_pages()  # Einmal zu Beginn
+
+# --------- Slash-Commands ---------
+@bot.tree.command(name="wikimain", description="Setzt den Hauptkanal für das Wiki-Menü")
+@app_commands.describe(channel="Textkanal für das Wiki-Menü")
 async def wikimain(interaction: discord.Interaction, channel: discord.TextChannel):
     global wiki_main_channel_id
     wiki_main_channel_id = channel.id
     await interaction.response.send_message(f"Wiki-Main-Channel gesetzt: {channel.mention}", ephemeral=True)
     await post_wiki_menu()
 
-# WIKI SEITE HINZUFÜGEN (mit DM-Backup an Admin)
-@bot.tree.command(name="wiki_page", description="Fügt eine Wiki-Seite aus aktuellem Channel hinzu", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="wiki_page", description="Speichert den aktuellen Channel als Wiki-Seite und löscht ihn")
 async def wiki_page(interaction: discord.Interaction):
     ch = interaction.channel
     title = ch.name.replace("-", " ").capitalize()
+    # Den ersten echten User-Post als Seiteninhalt nehmen (max 30 Nachrichten scannen)
     async for msg in ch.history(limit=30, oldest_first=True):
         if msg.author.bot:
             continue
@@ -618,121 +626,80 @@ async def wiki_page(interaction: discord.Interaction):
         if not content:
             continue
         wiki_pages[title] = content
-        save_wiki_pages(wiki_pages)
-        # Backup anlegen für Undo
+        save_json(WIKI_DATA_FILE, wiki_pages)
         wiki_backup[title] = content
-        save_wiki_backup(wiki_backup)
-        # NEU: DM an Admin schicken
+        save_json(WIKI_BACKUP_FILE, wiki_backup)
+        # Backup per DM an Command-User
         try:
             await interaction.user.send(
-                f"**Wiki-Backup:**\nTitel: `{title}`\n\n{content}"
+                f"**Wiki-Backup:**\nTitel: `{title}`\n\n{content[:1800]}" +
+                (f"\n\n[Text gekürzt]" if len(content) > 1800 else "")
             )
         except Exception:
             pass
         await ch.delete()
         await interaction.response.send_message(
-            f"Wiki-Seite '{title}' gespeichert und Channel gelöscht. Backup wurde dir per DM geschickt!", ephemeral=True)
+            f"Wiki-Seite '{title}' gespeichert, Channel gelöscht. Backup wurde dir per DM geschickt!", ephemeral=True)
         await post_wiki_menu()
         return
     await interaction.response.send_message(
         "Keine passende Nachricht im Channel gefunden. Seite nicht gespeichert.", ephemeral=True)
 
-# WIKI MENU POSTEN/AKTUALISIEREN
-async def post_wiki_menu():
-    if not wiki_main_channel_id:
-        return
-    ch = bot.get_channel(wiki_main_channel_id)
-    if not ch:
-        return
-    if not wiki_pages:
-        await ch.send("Keine Wiki-Seiten verfügbar.")
-        return
-    view = discord.ui.View(timeout=None)
-    options = [
-        discord.SelectOption(label=title, value=title)
-        for title in wiki_pages
-    ]
-    sel = discord.ui.Select(placeholder="Wiki-Seite auswählen...", options=options)
-    async def sel_cb(inter):
-        title = inter.data["values"][0]
-        text = wiki_pages.get(title, "")
-        # Falls Text zu lang, splitten
-        chunks = [text[i:i+1800] for i in range(0, len(text), 1800)]
-        for chunk in chunks:
-            await inter.response.send_message(
-                f"**{title}**\n{chunk}", ephemeral=True)
-    sel.callback = sel_cb
-    view.add_item(sel)
-    await ch.send("📚 **Wiki-Auswahl:**", view=view)
-
-# WIKI SEITE EDITIEREN
-@bot.tree.command(name="wiki_edit", description="Bearbeite eine gespeicherte Wiki-Seite", guild=discord.Object(id=GUILD_ID))
-async def wiki_edit(interaction: discord.Interaction):
-    if not wiki_pages:
-        return await interaction.response.send_message("Keine Wiki-Seiten vorhanden.", ephemeral=True)
-    view = discord.ui.View(timeout=120)
-    options = [discord.SelectOption(label=title, value=title) for title in wiki_pages]
-    sel = discord.ui.Select(placeholder="Seite auswählen...", options=options)
-    async def sel_cb(inter):
-        title = inter.data["values"][0]
-        orig = wiki_pages[title]
-        # Temporärer Channel erstellen
-        cat = interaction.channel.category
-        temp_ch = await interaction.guild.create_text_channel(f"edit-{title}", category=cat)
-        await temp_ch.send(f"**Editiere die Seite `{title}`:**\n\n{orig}\n\n_Nach Änderung tippe `/wiki_save {title}`_")
-        await inter.response.send_message(f"Channel zum Editieren erstellt: {temp_ch.mention}", ephemeral=True)
-    sel.callback = sel_cb
-    view.add_item(sel)
-    await interaction.response.send_message("Wähle eine Seite zum Editieren:", view=view, ephemeral=True)
-
-# WIKI SEITE SPEICHERN (nach Bearbeitung)
-@bot.tree.command(name="wiki_save", description="Speichert eine bearbeitete Wiki-Seite", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(title="Seitentitel")
-async def wiki_save(interaction: discord.Interaction, title: str):
-    ch = interaction.channel
-    async for msg in ch.history(limit=10, oldest_first=False):
-        if msg.author == interaction.user and msg.content.strip():
-            wiki_pages[title] = msg.content.strip()
-            save_wiki_pages(wiki_pages)
-            wiki_backup[title] = msg.content.strip()
-            save_wiki_backup(wiki_backup)
-            await ch.delete()
-            await interaction.response.send_message("Seite gespeichert & Channel gelöscht!", ephemeral=True)
-            await post_wiki_menu()
-            return
-    await interaction.response.send_message("Konnte keine Änderung erkennen!", ephemeral=True)
-
-# WIKI SEITE LÖSCHEN
-@bot.tree.command(name="wiki_delete", description="Löscht eine Wiki-Seite", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="wiki_delete", description="Löscht eine Wiki-Seite")
 async def wiki_delete(interaction: discord.Interaction):
     if not wiki_pages:
         return await interaction.response.send_message("Keine Wiki-Seiten vorhanden.", ephemeral=True)
     view = discord.ui.View(timeout=120)
-    options = [discord.SelectOption(label=title, value=title) for title in wiki_pages]
+    options = [discord.SelectOption(label=title, value=title) for title in list(wiki_pages)[:25]]
     sel = discord.ui.Select(placeholder="Seite auswählen...", options=options)
     async def sel_cb(inter):
         title = inter.data["values"][0]
         wiki_pages.pop(title, None)
-        save_wiki_pages(wiki_pages)
+        save_json(WIKI_DATA_FILE, wiki_pages)
         await inter.response.send_message(f"Seite '{title}' gelöscht.", ephemeral=True)
         await post_wiki_menu()
     sel.callback = sel_cb
     view.add_item(sel)
     await interaction.response.send_message("Wähle eine Seite zum Löschen:", view=view, ephemeral=True)
 
-# WIKI BACKUP UNDO: Einzel-Channel wiederherstellen
-@bot.tree.command(name="wiki_backup", description="Stellt einzelne Wiki-Seiten als Channels wieder her", guild=discord.Object(id=GUILD_ID))
+@bot.tree.command(name="wiki_edit", description="Bearbeite eine gespeicherte Wiki-Seite")
+async def wiki_edit(interaction: discord.Interaction):
+    if not wiki_pages:
+        return await interaction.response.send_message("Keine Wiki-Seiten vorhanden.", ephemeral=True)
+    view = discord.ui.View(timeout=120)
+    options = [discord.SelectOption(label=title, value=title) for title in list(wiki_pages)[:25]]
+    sel = discord.ui.Select(placeholder="Seite auswählen...", options=options)
+    async def sel_cb(inter):
+        title = inter.data["values"][0]
+        modal = discord.ui.Modal(title=f"Wiki-Seite bearbeiten: {title}")
+        content_box = discord.ui.TextInput(label="Inhalt", style=discord.TextStyle.long, default=wiki_pages[title], required=True, max_length=1800)
+        modal.add_item(content_box)
+        async def on_submit(m_inter):
+            wiki_pages[title] = content_box.value
+            save_json(WIKI_DATA_FILE, wiki_pages)
+            wiki_backup[title] = content_box.value
+            save_json(WIKI_BACKUP_FILE, wiki_backup)
+            await m_inter.response.send_message(f"Seite '{title}' aktualisiert!", ephemeral=True)
+            await post_wiki_menu()
+        modal.on_submit = on_submit
+        await inter.response.send_modal(modal)
+    sel.callback = sel_cb
+    view.add_item(sel)
+    await interaction.response.send_message("Wähle eine Seite zum Bearbeiten:", view=view, ephemeral=True)
+
+@bot.tree.command(name="wiki_backup", description="Stellt einzelne Wiki-Seiten als Channel wieder her")
 async def wiki_backup_cmd(interaction: discord.Interaction):
     if not wiki_backup:
         return await interaction.response.send_message("Keine Backups vorhanden.", ephemeral=True)
     view = discord.ui.View(timeout=120)
-    options = [discord.SelectOption(label=title, value=title) for title in wiki_backup]
+    options = [discord.SelectOption(label=title, value=title) for title in list(wiki_backup)[:25]]
     sel = discord.ui.Select(placeholder="Backup-Seite wiederherstellen...", options=options)
     async def sel_cb(inter):
         title = inter.data["values"][0]
         cat = interaction.channel.category
         ch = await interaction.guild.create_text_channel(title.replace(" ", "-").lower(), category=cat)
         text = wiki_backup[title]
+        # In 1800er Blöcke splitten
         chunks = [text[i:i+1800] for i in range(0, len(text), 1800)]
         for chunk in chunks:
             await ch.send(chunk)
@@ -741,189 +708,246 @@ async def wiki_backup_cmd(interaction: discord.Interaction):
     view.add_item(sel)
     await interaction.response.send_message("Wähle ein Backup zum Wiederherstellen:", view=view, ephemeral=True)
 
- 
-# ───── SCHICHTÜBERGABE SYSTEM ──────────────────────────────────────────────────────────────
+# ---- WIKI MENU/Dropdown posten (immer max. 25 Seiten pro View, Discord-Limit) ----
+async def post_wiki_menu():
+    if not wiki_main_channel_id:
+        return
+    ch = bot.get_channel(wiki_main_channel_id)
+    if not ch:
+        return
+    async for msg in ch.history(limit=50):
+        if msg.author == bot.user:
+            try:
+                await msg.delete()
+            except Exception:
+                pass
+    if not wiki_pages:
+        await ch.send("Keine Wiki-Seiten verfügbar.")
+        return
+    view = discord.ui.View(timeout=None)
+    options = [
+        discord.SelectOption(label=title, value=title)
+        for title in list(wiki_pages)[:25]
+    ]
+    sel = discord.ui.Select(placeholder="Wiki-Seite auswählen...", options=options)
+    async def sel_cb(inter):
+        title = inter.data["values"][0]
+        text = wiki_pages.get(title, "")
+        chunks = [text[i:i+1800] for i in range(0, len(text), 1800)]
+        for chunk in chunks:
+            await inter.response.send_message(f"**{title}**\n{chunk}", ephemeral=True)
+    sel.callback = sel_cb
+    view.add_item(sel)
+    await ch.send("📚 **Wiki-Auswahl:**", view=view)
 
-SCHICHT_CONFIG_FILE = "schicht_config.json"
-
-def load_schicht_cfg():
+# ---- Beim Bot-Start: Slash-Commands neu synchronisieren ----
+@bot.event
+async def on_ready():
     try:
-        with open(SCHICHT_CONFIG_FILE, "r", encoding="utf-8") as f:
+        await bot.tree.sync()
+        print("Slash-Commands synchronisiert!")
+    except Exception as e:
+        print(f"Fehler bei der Command-Synchronisierung: {e}")
+
+# ================= SCHICHTÜBERGABE SYSTEM ======================
+import asyncio
+import discord
+from discord import app_commands
+
+SCHICHT_CHANNEL_FILE = "schicht_channel.json"
+SCHICHT_LOG_FILE = "schicht_log.json"
+SCHICHT_VOICE_FILE = "schicht_voice.json"
+SCHICHT_ROLES_FILE = "schicht_roles.json"
+
+def load_json(path, default):
+    try:
+        with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except:
-        return {}
+        return default
 
-def save_schicht_cfg(data):
-    with open(SCHICHT_CONFIG_FILE, "w", encoding="utf-8") as f:
+def save_json(path, data):
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-schicht_cfg = load_schicht_cfg()
-schicht_channel_id = schicht_cfg.get("channel_id")
-schicht_voicemaster_id = schicht_cfg.get("voicemaster_id")
-schicht_log_id = schicht_cfg.get("log_id")
-schicht_allowed_roles = set(schicht_cfg.get("allowed_roles", []))
+schicht_channel_id = load_json(SCHICHT_CHANNEL_FILE, {}).get("channel_id")
+schicht_log_channel_id = load_json(SCHICHT_LOG_FILE, {}).get("channel_id")
+schicht_voice_id = load_json(SCHICHT_VOICE_FILE, {}).get("voice_id")
+schicht_roles = set(load_json(SCHICHT_ROLES_FILE, {}).get("role_ids", []))
 
-# Hilfsfunktion: Rechtecheck für Schichtübergabe (Admin oder erlaubte Rolle)
-def is_schicht_admin(user):
-    if hasattr(user, "guild_permissions") and user.guild_permissions.administrator:
-        return True
-    if hasattr(user, "id") and user.id == bot.owner_id:
-        return True
-    return False
-
-def has_schicht_role(user):
-    return any(r.id in schicht_allowed_roles for r in user.roles) or is_schicht_admin(user)
-
-# Befehl: Schicht-Kanal festlegen
-@bot.tree.command(name="schichtwechsel", description="Setzt den Schichtwechsel-Channel", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(channel="Text-Channel für Schichtwechsel")
+# --- Admin-Befehle zur Konfiguration ---
+@bot.tree.command(name="schichtwechsel", description="Setzt den Hauptkanal für Schichtübergaben", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Textkanal für Schichtwechsel")
 async def schichtwechsel(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not is_schicht_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
     global schicht_channel_id
     schicht_channel_id = channel.id
-    schicht_cfg["channel_id"] = schicht_channel_id
-    save_schicht_cfg(schicht_cfg)
-    await interaction.response.send_message(f"Schichtwechsel-Channel gesetzt: {channel.mention}", ephemeral=True)
-    await post_schicht_info()
+    save_json(SCHICHT_CHANNEL_FILE, {"channel_id": channel.id})
+    await interaction.response.send_message(f"Schichtübergabe-Channel gesetzt: {channel.mention}", ephemeral=True)
+    await post_schicht_button()
 
-# Befehl: VoiceMaster Eingangskanal festlegen
-@bot.tree.command(name="schichtvoiceid", description="Setzt den Eingangskanal für VoiceMaster", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(voice_id="Channel-ID für VoiceMaster-Eingang")
-async def schichtvoiceid(interaction: discord.Interaction, voice_id: str):
-    if not is_schicht_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global schicht_voicemaster_id
-    schicht_voicemaster_id = int(voice_id)
-    schicht_cfg["voicemaster_id"] = schicht_voicemaster_id
-    save_schicht_cfg(schicht_cfg)
-    await interaction.response.send_message(f"VoiceMaster-Eingangskanal gesetzt: `{voice_id}`", ephemeral=True)
+@bot.tree.command(name="schicht_voiceid", description="Setzt den VoiceMaster-Eingangskanal", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(voice_id="Voice Channel ID")
+async def schicht_voiceid(interaction: discord.Interaction, voice_id: str):
+    global schicht_voice_id
+    schicht_voice_id = int(voice_id)
+    save_json(SCHICHT_VOICE_FILE, {"voice_id": schicht_voice_id})
+    await interaction.response.send_message(f"VoiceMaster-Eingangskanal gesetzt: <#{schicht_voice_id}>", ephemeral=True)
 
-# Befehl: Log-Channel festlegen
-@bot.tree.command(name="schichtlog", description="Setzt den Log-Channel für Schichtübergaben", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(channel="Text-Channel für Schicht-Logs")
+@bot.tree.command(name="schichtlog", description="Setzt den Log-Kanal für Schichtübergaben", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(channel="Textkanal für Logs")
 async def schichtlog(interaction: discord.Interaction, channel: discord.TextChannel):
-    if not is_schicht_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    global schicht_log_id
-    schicht_log_id = channel.id
-    schicht_cfg["log_id"] = schicht_log_id
-    save_schicht_cfg(schicht_cfg)
-    await interaction.response.send_message(f"Schicht-Log-Channel gesetzt: {channel.mention}", ephemeral=True)
+    global schicht_log_channel_id
+    schicht_log_channel_id = channel.id
+    save_json(SCHICHT_LOG_FILE, {"channel_id": channel.id})
+    await interaction.response.send_message(f"Log-Channel für Schichtübergaben gesetzt: {channel.mention}", ephemeral=True)
 
-# Rollen erlauben/entfernen
-@bot.tree.command(name="schichtrollen", description="Erlaubt eine Rolle für Schichtübergabe", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Rolle für Schichtübergabe freischalten")
+@bot.tree.command(name="schichtrollen", description="Fügt eine Rolle hinzu, deren Mitglieder Schichtübergabe machen können", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(role="Discord Rolle")
 async def schichtrollen(interaction: discord.Interaction, role: discord.Role):
-    if not is_schicht_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    schicht_allowed_roles.add(role.id)
-    schicht_cfg["allowed_roles"] = list(schicht_allowed_roles)
-    save_schicht_cfg(schicht_cfg)
-    await interaction.response.send_message(f"Rolle {role.mention} kann jetzt als Ziel gewählt werden.", ephemeral=True)
+    global schicht_roles
+    schicht_roles.add(role.id)
+    save_json(SCHICHT_ROLES_FILE, {"role_ids": list(schicht_roles)})
+    await interaction.response.send_message(f"Rolle **{role.name}** kann jetzt Schichtübergabe!", ephemeral=True)
 
-@bot.tree.command(name="schichtrollenremove", description="Entfernt eine erlaubte Rolle", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(role="Rolle für Schichtübergabe entfernen")
-async def schichtrollenremove(interaction: discord.Interaction, role: discord.Role):
-    if not is_schicht_admin(interaction.user):
-        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-    if role.id in schicht_allowed_roles:
-        schicht_allowed_roles.remove(role.id)
-        schicht_cfg["allowed_roles"] = list(schicht_allowed_roles)
-        save_schicht_cfg(schicht_cfg)
-        await interaction.response.send_message(f"Rolle {role.mention} ist entfernt.", ephemeral=True)
-    else:
-        await interaction.response.send_message(f"Rolle {role.mention} war nicht freigeschaltet.", ephemeral=True)
+@bot.tree.command(name="schichtrollen_remove", description="Entfernt eine Schicht-Rolle", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(role="Discord Rolle")
+async def schichtrollen_remove(interaction: discord.Interaction, role: discord.Role):
+    global schicht_roles
+    schicht_roles.discard(role.id)
+    save_json(SCHICHT_ROLES_FILE, {"role_ids": list(schicht_roles)})
+    await interaction.response.send_message(f"Rolle **{role.name}** kann nun keine Schichtübergabe mehr.", ephemeral=True)
 
-# Die Haupt-Info/Botnachricht im Schicht-Channel posten
-async def post_schicht_info():
+# --- Nutzer-Prüfung ---
+def user_has_schicht_role(member):
+    if member.guild_permissions.administrator:
+        return True
+    return any(r.id in schicht_roles for r in member.roles)
+
+# --- Schichtübergabe Hauptbutton posten ---
+async def post_schicht_button():
     if not schicht_channel_id:
         return
     ch = bot.get_channel(schicht_channel_id)
     if not ch:
         return
+    async for msg in ch.history(limit=30):
+        if msg.author == bot.user:
+            try: await msg.delete()
+            except: pass
     embed = discord.Embed(
-        title="⏰ Schichtübergabe starten",
+        title="🔄 Schichtübergabe starten",
         description=(
-            "**So funktioniert es:**\n"
-            "• Tippe `/schichtuebergabe nutzer:<name>` in den Chat\n"
-            "• Wähle den gewünschten Nutzer (mit passender Rolle!) aus der Liste aus\n"
-            "• Fertig! Die Schichtübergabe läuft automatisch ab.\n\n"
-            "**Der Befehl:**\n"
-            "```/schichtuebergabe nutzer:<name>```\n"
-            "_Der Nutzer muss aktuell in einem Sprachkanal sein und eine erlaubte Rolle haben._\n"
-            "_Du musst dich in einem Sprachkanal befinden._"
+            "Klicke auf **Schichtübergabe starten**.\n"
+            "Du kannst dann `/schichtuebergabe @User` ausführen (nur Berechtigte).\n\n"
+            "**Voraussetzung:** Du bist in einem Voice-Channel & Nutzer online."
         ),
-        color=discord.Color.purple()
+        color=discord.Color.teal()
     )
     await ch.send(embed=embed)
 
-# Befehl: Schichtübergabe durchführen
-@bot.tree.command(name="schichtuebergabe", description="Starte eine Schichtübergabe", guild=discord.Object(id=GUILD_ID))
-@app_commands.describe(nutzer="Discord-Benutzername (autocomplete möglich)")
-async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
-    # Prüfe, ob User die Berechtigung hat (Admin, allowed Role)
-    if not has_schicht_role(interaction.user):
-        return await interaction.response.send_message("Du hast keine Berechtigung für die Schichtübergabe.", ephemeral=True)
+# --- Schichtübergabe-Befehl mit Übergabe & Checks ---
+@bot.tree.command(name="schichtuebergabe", description="Starte die Schichtübergabe an einen Nutzer mit Rollen-Filter", guild=discord.Object(id=GUILD_ID))
+@app_commands.describe(user="Nutzer (Taggen mit @...)")
+async def schichtuebergabe(interaction: discord.Interaction, user: discord.Member):
+    # Rechte prüfen
+    if not user_has_schicht_role(interaction.user):
+        return await interaction.response.send_message("Du hast keine Berechtigung für Schichtübergaben!", ephemeral=True)
 
-    # Prüfe, ob User selbst in einem Sprachkanal ist
+    # Ist Initiator im Voice-Channel?
     if not interaction.user.voice or not interaction.user.voice.channel:
-        return await interaction.response.send_message("Du musst dich in einem Sprachkanal befinden!", ephemeral=True)
-
-    # Finde den Ziel-User
-    target = discord.utils.find(
-        lambda m: m.display_name.lower() == nutzer.lower() or m.name.lower() == nutzer.lower(), interaction.guild.members
-    )
-    if not target:
-        return await interaction.response.send_message(f"Nutzer `{nutzer}` nicht gefunden.", ephemeral=True)
-    if target.bot:
-        return await interaction.response.send_message("Bots können nicht als Ziel gewählt werden!", ephemeral=True)
-    if not any(r.id in schicht_allowed_roles for r in target.roles):
-        return await interaction.response.send_message(f"{target.mention} hat keine erlaubte Rolle für die Schichtübergabe!", ephemeral=True)
-    # Prüfe, ob Ziel im Voice ist
-    if not target.voice or not target.voice.channel:
-        # Versuch, DM zu schicken
+        return await interaction.response.send_message("Du musst dich in einem Voice-Channel befinden!", ephemeral=True)
+    # Ist Zielnutzer online?
+    if not user.status == discord.Status.online and not user.voice:
+        # Try: Not online & nicht im Voice = DM und Fehler
         try:
-            await target.send(f"{interaction.user.mention} möchte dir die Schicht übergeben! Komm bitte ASAP online/in den Sprachkanal.")
+            await user.send(f"{interaction.user.mention} wollte dir die Schicht übergeben, du bist aber offline. Bitte melde dich asap!")
             await interaction.response.send_message(
-                f"{target.mention} ist nicht im Sprachkanal. Er wurde per DM benachrichtigt.", ephemeral=True)
+                f"{user.display_name} ist offline/weg – wurde per DM informiert!", ephemeral=True)
+            return
         except Exception:
-            await interaction.response.send_message(
-                f"{target.mention} ist nicht im Sprachkanal **und** hat DMs deaktiviert – bitte kontaktiere ihn persönlich.",
-                ephemeral=True)
+            await interaction.response.send_message("Nutzer ist offline und DMs deaktiviert.", ephemeral=True)
+            return
+
+    # Moven in VoiceMaster Eingangschannel
+    if not schicht_voice_id:
+        return await interaction.response.send_message("Kein VoiceMaster-Eingangskanal gesetzt! Nutze `/schicht_voiceid ...`", ephemeral=True)
+
+    try:
+        vc_start = bot.get_channel(schicht_voice_id)
+        await interaction.user.move_to(vc_start)
+    except Exception:
+        return await interaction.response.send_message("Fehler beim Moven in VoiceMaster-Eingangskanal.", ephemeral=True)
+    await asyncio.sleep(5)  # Zeit für VoiceMaster, neuen Temp-Channel zu erstellen
+
+    # Suche aktuellen Voice-Channel (könnte schon temp sein)
+    new_vc = interaction.user.voice.channel if interaction.user.voice else vc_start
+    try:
+        await user.move_to(new_vc)
+    except Exception:
+        await interaction.response.send_message("Fehler beim Moven des Nutzers – ist er noch im Voice?", ephemeral=True)
         return
 
-    # Starte den Move-Prozess
-    voicemaster_channel = bot.get_channel(schicht_voicemaster_id) if schicht_voicemaster_id else None
-    if not voicemaster_channel:
-        return await interaction.response.send_message("VoiceMaster-Eingangskanal ist nicht gesetzt.", ephemeral=True)
-    # Move den anfragenden User in den Eingangskanal (VoiceMaster)
-    try:
-        await interaction.user.move_to(voicemaster_channel)
-        await interaction.response.send_message(
-            f"{interaction.user.mention} wird in den VoiceMaster-Eingang verschoben, Schichtübergabe läuft!", ephemeral=True)
-        await asyncio.sleep(5)  # Warten bis temporärer Channel erstellt wird
-        # Finde den Channel, in dem der anfragende User jetzt sitzt (könnte neu sein)
-        after_channel = interaction.user.voice.channel
-        await target.move_to(after_channel)
-        # Log-Eintrag
-        if schicht_log_id:
-            logch = bot.get_channel(schicht_log_id)
-            if logch:
-                await logch.send(f"**Schichtwechsel**: {interaction.user.mention} → {target.mention} ✅ (Voice: {after_channel.name})")
-    except Exception as e:
-        await interaction.followup.send(f"Fehler beim Verschieben: {e}", ephemeral=True)
+    # Erfolgs-Info & Logging
+    await interaction.response.send_message(
+        f"✅ Schichtübergabe erfolgreich! {user.mention} wurde zu dir in <#{new_vc.id}> verschoben.",
+        ephemeral=True
+    )
+    if schicht_log_channel_id:
+        log_ch = bot.get_channel(schicht_log_channel_id)
+        if log_ch:
+            await log_ch.send(
+                f"🟢 **Schichtübergabe:** {interaction.user.mention} → {user.mention} | Channel: <#{new_vc.id}>"
+            )
 
-# Beim Bot-Start ggf. Info-Nachricht erneut posten
+# --- On Bot Ready: Slash-Commands sync ---
 @bot.event
 async def on_ready():
-    global schicht_cfg, schicht_channel_id, schicht_voicemaster_id, schicht_log_id, schicht_allowed_roles
-    schicht_cfg = load_schicht_cfg()
-    schicht_channel_id = schicht_cfg.get("channel_id")
-    schicht_voicemaster_id = schicht_cfg.get("voicemaster_id")
-    schicht_log_id = schicht_cfg.get("log_id")
-    schicht_allowed_roles = set(schicht_cfg.get("allowed_roles", []))
-    await post_schicht_info()
+    try:
+        await bot.tree.sync()
+        print("Slash-Commands für Guild taskt synchronisiert!")
+    except Exception as e:
+        print(f"Fehler bei Slash-Command-Sync: {e}")
+# =================== RAILWAY-PERSISTENZ/LOADER ====================
+import os
+import shutil
+
+# ---- Nutze einen festen Speicherort im Project Root für alle wichtigen JSON-Dateien ----
+DATA_FILES = [
+    "profiles.json", "translation_log.json", "translator_menu.json",
+    "strike_data.json", "strike_list.json", "strike_roles.json",
+    "wiki_pages.json", "wiki_backup.json",
+    "schicht_channel.json", "schicht_log.json", "schicht_voice.json", "schicht_roles.json"
+]
+
+DATA_BACKUP_DIR = "railway_data_backup"
+
+def railway_ensure_persistence():
+    # Prüfe ob Daten existieren – falls ja, sichere sie, falls nein, kopiere sie zurück
+    if not os.path.isdir(DATA_BACKUP_DIR):
+        os.mkdir(DATA_BACKUP_DIR)
+    # Backup vorhandener Daten (beim Herunterfahren/Speichern)
+    for f in DATA_FILES:
+        if os.path.exists(f):
+            shutil.copy2(f, os.path.join(DATA_BACKUP_DIR, f))
+    # Restore falls Dateien fehlen (beim Neustart/Update)
+    for f in DATA_FILES:
+        src = os.path.join(DATA_BACKUP_DIR, f)
+        if not os.path.exists(f) and os.path.exists(src):
+            shutil.copy2(src, f)
+
+# Railway: Backup bei Bot-Stop & Restore bei Start
+@bot.event
+async def on_ready():
+    railway_ensure_persistence()
+    try:
+        await bot.tree.sync()
+        print("Slash-Commands synchronisiert!")
+    except Exception as e:
+        print(f"Fehler bei Command-Sync: {e}")
+
+import atexit
+atexit.register(railway_ensure_persistence)
+
 
 # NUR EINMAL GANZ UNTEN!
 bot.run(DISCORD_TOKEN)
