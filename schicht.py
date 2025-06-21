@@ -2,7 +2,7 @@ import discord
 from discord.ext import commands
 from discord import app_commands
 import asyncio
-from utils import load_json, save_json, is_admin
+from utils import load_json, save_json, is_admin, has_role, has_any_role, mention_roles, get_member_by_id
 
 SCHICHT_CONFIG_FILE = "persistent_data/schicht_config.json"
 SCHICHT_RIGHTS_FILE = "persistent_data/schicht_rights.json"
