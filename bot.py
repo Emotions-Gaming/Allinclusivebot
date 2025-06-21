@@ -1,94 +1,60 @@
 import os
-import logging
-from dotenv import load_dotenv
 import discord
 from discord.ext import commands
+from dotenv import load_dotenv
 
-# ----------------------------- #
-# 1. Logging Setup
-# ----------------------------- #
-logging.basicConfig(
-    level=logging.INFO,
-    format='[%(asctime)s] %(levelname)s: %(message)s',
-    handlers=[logging.StreamHandler()]
-)
-
-# ----------------------------- #
-# 2. Lade Umgebungsvariablen
-# ----------------------------- #
+# ====== ENV LOAD ======
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GUILD_ID = int(os.getenv("GUILD_ID", 0))
+GUILD_ID = int(os.getenv("GUILD_ID") or "0")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
-if not DISCORD_TOKEN:
-    logging.error("DISCORD_TOKEN fehlt in .env oder Railway.")
-    exit(1)
-if not GUILD_ID:
-    logging.warning("GUILD_ID ist nicht gesetzt! Slash-Command-Sync evtl. fehlerhaft.")
-
-# ----------------------------- #
-# 3. Intents & Bot-Objekt
-# ----------------------------- #
 intents = discord.Intents.default()
 intents.members = True
+intents.presences = True
 intents.message_content = True
-intents.guilds = True
-intents.presences = True  # Für Online-Status-Checks
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# ----------------------------- #
-# 4. Events: Startup & Fehler
-# ----------------------------- #
+# ====== Alle Module/Extensions, die geladen werden ======
+STARTUP_EXTENSIONS = [
+    "persist",      # Railway Persistenz
+    "utils",        # Hilfsfunktionen (muss früh geladen werden!)
+    "translation",  # Übersetzungs-/Gemini-System
+    "strike",       # Strike-/Admin-System
+    "wiki",         # Wiki-System
+    "schicht",      # Schichtübergabe
+    "alarm",        # Alarm-/Claim-System
+]
+
 @bot.event
 async def on_ready():
-    logging.info(f"Bot online als {bot.user} (ID: {bot.user.id})")
-    # Optional: Slash-Command Sync (lokal ODER GUILD-spezifisch)
+    print(f"✅ Bot online: {bot.user}")
     try:
-        if GUILD_ID:
-            guild = discord.Object(id=GUILD_ID)
+        # Sync alle Commands explizit auf GUILD (Dev) und global
+        guild = discord.Object(id=GUILD_ID) if GUILD_ID else None
+        if guild:
             await bot.tree.sync(guild=guild)
-            logging.info(f"Slash-Commands für Guild {GUILD_ID} synchronisiert.")
+            await bot.tree.sync()  # Optional: für globale Commands (Achtung: dauert länger!)
+            print("🟢 Slash-Commands synchronisiert (Guild & global)")
         else:
             await bot.tree.sync()
-            logging.info(f"Slash-Commands global synchronisiert.")
+            print("🟢 Slash-Commands synchronisiert (Global)")
     except Exception as e:
-        logging.error(f"Fehler beim Slash-Command-Sync: {e}")
+        print(f"❌ Fehler beim Command-Sync: {e}")
 
-@bot.event
-async def on_command_error(ctx, error):
-    # Für !-Befehle
-    await ctx.send(f"❌ Fehler: {error}")
+    print("Alle Extensions geladen und ready!")
 
-@bot.event
-async def on_error(event, *args, **kwargs):
-    logging.error(f"Unbehandelter Fehler im Event {event}:", exc_info=True)
-
-# ----------------------------- #
-# 5. Lade Extensions (Module)
-# ----------------------------- #
-async def load_extensions():
-    for ext in [
-        "utils",          # Hilfsfunktionen
-        "translation",    # Übersetzungs-Modul
-        "strike",         # Strike/Verwarnsystem
-        "wiki",           # Wiki-System
-        "schicht",        # Schichtwechsel/Übergabe
-        "alarm",          # Alarm-/Notfall-System
-        # "persist"       # Wenn persistente Daten in eigenem Modul (optional)
-    ]:
+async def main():
+    # Extensions laden (Reihenfolge ist wichtig!)
+    for ext in STARTUP_EXTENSIONS:
         try:
             await bot.load_extension(ext)
-            logging.info(f"Extension '{ext}' geladen.")
+            print(f"🧩 Extension geladen: {ext}")
         except Exception as e:
-            logging.warning(f"Extension '{ext}' konnte nicht geladen werden: {e}")
+            print(f"❌ Fehler beim Laden von {ext}: {e}")
 
-# ----------------------------- #
-# 6. Bot starten
-# ----------------------------- #
-async def main():
-    await load_extensions()
+    # Bot starten
     await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
