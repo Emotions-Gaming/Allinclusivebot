@@ -756,18 +756,6 @@ async def on_ready():
     except Exception as e:
         print(f"Fehler bei der Command-Synchronisierung: {e}")
 
-import os
-import json
-import asyncio
-from dotenv import load_dotenv
-import discord
-from discord.ext import commands
-from discord import app_commands
-
-# === ENV ===
-load_dotenv()
-GUILD_ID = int(os.getenv("GUILD_ID") or "1249813174731931740")
-
 # === Dateipfade ===
 SCHICHTROLLEN_FILE = "schichtrollen.json"
 SCHICHTWECHSEL_KANAL_FILE = "schichtwechsel_kanal.json"
@@ -930,7 +918,6 @@ async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
         await logchan.send(f"Schichtübergabe von {interaction.user.mention} an {target.mention} erfolgreich abgeschlossen.")
 
     await interaction.response.send_message(f"Schichtübergabe an {target.mention} abgeschlossen!", ephemeral=True)
-
 
 # =================== RAILWAY-PERSISTENZ/LOADER ====================
 import os
