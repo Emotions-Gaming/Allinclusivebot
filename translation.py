@@ -1,151 +1,55 @@
-import os
-import aiohttp
 import discord
 from discord import app_commands
 from discord.ext import commands
-from utils import load_json, save_json, is_admin  # <- Achtung: utils.py MUSS im Projekt liegen!
+import aiohttp
+import asyncio
+import os
 
-# === Konstanten & Konfigs ===
-PROFILES_FILE = "persistent_data/profiles.json"
-MENU_FILE = "persistent_data/translator_menu.json"
-PROMPT_FILE = "persistent_data/translator_prompt.json"
-TRANS_CAT_FILE = "persistent_data/trans_category.json"
-TRANSLATION_LOG = "persistent_data/translation_log.json"
+from utils import load_json, save_json, is_admin
 
-# Environment Variablen (Railway oder .env)
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GUILD_ID = int(os.getenv("GUILD_ID") or "0")  # als Fallback 0
+# ---------- Konstanten ---------- #
+PROFILES_FILE   = "profiles.json"
+MENU_FILE       = "translator_menu.json"
+PROMPT_FILE     = "translator_prompt.json"
+TRANS_CAT_FILE  = "trans_category.json"
+TRANSLATION_LOG = "translation_log.json"
 
-MODEL_ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+MODEL_ENDPOINT  = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
-# === Lade Daten ===
-profiles = load_json(PROFILES_FILE, {"Normal": "neutraler professioneller Stil"})
-menu_cfg = load_json(MENU_FILE, {})
-prompt_cfg = load_json(PROMPT_FILE, {})
+# ---------- Setup: Laden ---------- #
+profiles      = load_json(PROFILES_FILE, {"Normal": "neutraler professioneller Stil"})
+menu_cfg      = load_json(MENU_FILE, {})
+prompt_cfg    = load_json(PROMPT_FILE, {})
 trans_cat_cfg = load_json(TRANS_CAT_FILE, {})
-translation_log = load_json(TRANSLATION_LOG, {})
+active_sessions = {}      # (user_id, profile) -> channel_id
+channel_info     = {}     # channel_id -> (user_id, profile, style)
+channel_logs     = {}     # channel_id -> [ (user, text, translation) ]
 
-menu_channel_id = menu_cfg.get("channel_id")
-menu_message_id = menu_cfg.get("message_id")
-prompt_add = prompt_cfg.get("addition", "")
-trans_cat_id = trans_cat_cfg.get("category_id", None)
-
-active_sessions = {}   # (user_id, profile) -> channel_id
-channel_info = {}      # channel_id -> (user_id, profile, style)
-channel_logs = {}      # channel_id -> [ (user, text, translation) ]
-
-def get_prompt(style, extra, txt):
-    base_prompt = (
-        "Erkenne die Sprache des folgenden OnlyFans-Chat-Textes."
-        " Wenn es Deutsch ist, übersetze ihn nuanciert ins Englische im Stil: {style}."
-        " Wenn es Englisch ist, übersetze ihn nuanciert ins Deutsche im Stil: {style}."
-        " Verwende echten Slang, Chat-Sprache, keine Emojis, keine Smileys, keine Abkürzungen wie :), ;), etc."
-        " KEINE Emojis, keine Icons, keine GIFs. Es soll spontan, natürlich, aber menschlich klingen, nicht KI-generiert."
-        " Finde echte Äquivalente für kulturelle Referenzen."
-        " Antworte NUR mit der Übersetzung und nichts anderem."
-    ).format(style=style)
-    if extra:
-        base_prompt += "\nZusätzliche Regel: " + extra
-    return base_prompt + "\n" + txt
-
-async def call_gemini(prompt: str) -> str:
-    payload = {
-        "system_instruction": {"role": "system", "parts": [{"text": prompt}]},
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}]
-    }
-    params = {"key": GOOGLE_API_KEY}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(MODEL_ENDPOINT, params=params, json=payload) as resp:
-            if resp.status != 200:
-                await resp.text()
-                return "*Fehler bei Übersetzung*"
-            data = await resp.json()
-    cands = data.get("candidates", [])
-    if not cands:
-        return "*Fehler bei Übersetzung*"
-    parts = cands[0].get("content", {}).get("parts", [])
-    return "".join(p.get("text", "") for p in parts).strip()
-
-# ----------- Slash Commands -----------
-
-class Translation(commands.Cog):
+# ---------- Cog/Setup ---------- #
+class TranslationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
-    @app_commands.command(name="translatorpost", description="Postet das Übersetzungsmenü im aktuellen Kanal")
-    async def translatorpost(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        embed, view = self.make_translation_menu()
-        msg = await interaction.channel.send(embed=embed, view=view)
-        menu_channel_id = interaction.channel.id
-        menu_message_id = msg.id
-        save_json(MENU_FILE, {"channel_id": menu_channel_id, "message_id": msg.id})
-        await interaction.response.send_message("Übersetzungsmenü gepostet.", ephemeral=True)
+    # ===== Gemini Call =====
+    async def call_gemini(self, prompt: str) -> str:
+        payload = {
+            "system_instruction": {"role": "system", "parts": [{"text": prompt}]},
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}]
+        }
+        params = {"key": self.GOOGLE_API_KEY}
+        async with aiohttp.ClientSession() as session:
+            async with session.post(MODEL_ENDPOINT, params=params, json=payload) as resp:
+                if resp.status != 200:
+                    return "*Fehler bei Übersetzung*"
+                data = await resp.json()
+        cands = data.get("candidates", [])
+        if not cands:
+            return "*Fehler bei Übersetzung*"
+        parts = cands[0].get("content", {}).get("parts", [])
+        return "".join(p.get("text", "") for p in parts).strip()
 
-    @app_commands.command(name="translatoraddprofile", description="Fügt ein neues Übersetzer-Profil hinzu")
-    @app_commands.describe(name="Profilname", style="Stilbeschreibung")
-    async def translatoraddprofile(self, interaction: discord.Interaction, name: str, style: str):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        nm = name.strip()
-        if not nm or nm in profiles:
-            return await interaction.response.send_message("Ungültiger oder existierender Name.", ephemeral=True)
-        profiles[nm] = style
-        save_json(PROFILES_FILE, profiles)
-        await interaction.response.send_message(f"Profil **{nm}** hinzugefügt.", ephemeral=True)
-        await self.update_translation_menu()
-
-    @app_commands.command(name="translatordeleteprofile", description="Löscht ein Übersetzer-Profil")
-    @app_commands.describe(name="Profilname")
-    async def translatordeleteprofile(self, interaction: discord.Interaction, name: str):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        if name not in profiles:
-            return await interaction.response.send_message(f"Profil `{name}` nicht gefunden.", ephemeral=True)
-        profiles.pop(name)
-        save_json(PROFILES_FILE, profiles)
-        await interaction.response.send_message(f"Profil **{name}** gelöscht.", ephemeral=True)
-        await self.update_translation_menu()
-
-    @app_commands.command(name="translatorsetcategorie", description="Setzt die Kategorie für Übersetzungs-Session-Channels")
-    @app_commands.describe(category="Kategorie")
-    async def translatorsetcategorie(self, interaction: discord.Interaction, category: discord.CategoryChannel):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        global trans_cat_id
-        trans_cat_id = category.id
-        save_json(TRANS_CAT_FILE, {"category_id": category.id})
-        await interaction.response.send_message(f"Kategorie gesetzt: {category.name}", ephemeral=True)
-
-    @app_commands.command(name="translatorlog", description="Setzt den Log-Kanal für Übersetzungs-Session-Verläufe")
-    @app_commands.describe(channel="Text-Kanal für Logs")
-    async def translatorlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        menu_cfg = load_json(MENU_FILE, {})
-        menu_cfg["log_channel_id"] = channel.id
-        save_json(MENU_FILE, menu_cfg)
-        await interaction.response.send_message(f"Log-Kanal gesetzt: {channel.mention}", ephemeral=True)
-
-    @app_commands.command(name="translatorprompt", description="Fügt eine Regel zum Haupt-Prompt hinzu")
-    @app_commands.describe(text="Zusätzlicher Prompt-Text")
-    async def translatorprompt(self, interaction: discord.Interaction, text: str):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        save_json(PROMPT_FILE, {"addition": text})
-        await interaction.response.send_message(f"Prompt-Erweiterung gesetzt: **{text}**", ephemeral=True)
-
-    @app_commands.command(name="translatorpromptdelete", description="Entfernt die zusätzliche Prompt-Regel")
-    async def translatorpromptdelete(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        save_json(PROMPT_FILE, {"addition": ""})
-        await interaction.response.send_message("Prompt-Erweiterung entfernt.", ephemeral=True)
-
-    # --- Helper Methoden ---
-
+    # ======= UI für Übersetzungsmenü =======
     def make_translation_menu(self):
         embed = discord.Embed(
             title="📝 Translation Support",
@@ -158,27 +62,14 @@ class Translation(commands.Cog):
         async def sel_cb(inter: discord.Interaction):
             prof = inter.data["values"][0]
             await self.start_session(inter, prof)
-            # Reset dropdown
+            # Reset Dropdown nach Nutzung
             reset_embed, reset_view = self.make_translation_menu()
             await inter.message.edit(embed=reset_embed, view=reset_view)
         sel.callback = sel_cb
         view.add_item(sel)
         return embed, view
 
-    async def update_translation_menu(self):
-        global menu_channel_id, menu_message_id
-        if not (menu_channel_id and menu_message_id):
-            return
-        ch = self.bot.get_channel(menu_channel_id)
-        if not ch:
-            return
-        try:
-            msg = await ch.fetch_message(menu_message_id)
-            embed, view = self.make_translation_menu()
-            await msg.edit(embed=embed, view=view)
-        except Exception:
-            pass
-
+    # ======= Session Handling =======
     async def start_session(self, interaction: discord.Interaction, prof: str):
         user = interaction.user
         style = profiles[prof]
@@ -190,7 +81,7 @@ class Translation(commands.Cog):
         if key in active_sessions:
             return await interaction.response.send_message("Du hast bereits eine aktive Session.", ephemeral=True)
         guild = interaction.guild
-        cat = self.bot.get_channel(trans_cat_id) if trans_cat_id else None
+        cat = self.bot.get_channel(trans_cat_cfg.get("category_id")) if trans_cat_cfg.get("category_id") else None
         if not cat or cat.type != discord.ChannelType.category:
             cat = None
         overwrites = {
@@ -229,7 +120,7 @@ class Translation(commands.Cog):
                     value=f"**Input:** {text}\n**Output:** {trans}",
                     inline=False
                 )
-            log_channel_id = load_json(MENU_FILE, {}).get("log_channel_id", None)
+            log_channel_id = menu_cfg.get("log_channel_id")
             if log_channel_id:
                 log_channel = bi.guild.get_channel(log_channel_id)
                 if log_channel:
@@ -248,8 +139,7 @@ class Translation(commands.Cog):
         await ch.send(f"Session **{prof}** gestartet. Schreibe hier zum Übersetzen.", view=v)
         await interaction.response.send_message(f"Session erstellt: {ch.mention}", ephemeral=True)
 
-    # === Message-Event ===
-
+    # ======= Message-Listener für Übersetzung =======
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:
@@ -260,18 +150,96 @@ class Translation(commands.Cog):
         txt = message.content.strip()
         if not txt:
             return
+        base_prompt = (
+            "Erkenne die Sprache des folgenden OnlyFans-Chat-Textes."
+            " Wenn es Deutsch ist, übersetze ihn nuanciert ins Englische im Stil: {style}."
+            " Wenn es Englisch ist, übersetze ihn nuanciert ins Deutsche im Stil: {style}."
+            " Verwende echten Slang, Chat-Sprache, keine Emojis, keine Smileys, keine Abkürzungen wie :), ;), etc."
+            " KEINE Emojis, keine Icons, keine GIFs. Es soll spontan, natürlich, aber menschlich klingen, nicht KI-generiert."
+            " Finde echte Äquivalente für kulturelle Referenzen."
+            " Antworte NUR mit der Übersetzung und nichts anderem."
+        )
         prompt_extension = load_json(PROMPT_FILE, {}).get("addition", "")
-        prompt = get_prompt(info[2], prompt_extension, txt)
+        prompt = base_prompt.format(style=info[2])
+        if prompt_extension:
+            prompt += "\nZusätzliche Regel: " + prompt_extension
+        prompt += f"\n{txt}"
         try:
-            translation = await call_gemini(prompt)
+            translation = await asyncio.wait_for(self.call_gemini(prompt), timeout=25)
         except Exception:
             translation = "*Fehler bei Übersetzung*"
         emb = discord.Embed(description=f"```{translation}```", color=discord.Color.blue())
         emb.set_footer(text="Auto-Detected Translation")
         await message.channel.send(embed=emb)
         channel_logs[message.channel.id].append((message.author.display_name, txt, translation))
-        save_json(TRANSLATION_LOG, translation_log)  # Backup
 
-# === Extension Setup ===
+    # ========== Slash Commands ==========
+    @app_commands.command(name="translatorpost", description="Postet das Übersetzungsmenü im aktuellen Kanal")
+    async def translatorpost(self, interaction: discord.Interaction):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        embed, view = self.make_translation_menu()
+        msg = await interaction.channel.send(embed=embed, view=view)
+        menu_cfg["channel_id"] = interaction.channel.id
+        menu_cfg["message_id"] = msg.id
+        save_json(MENU_FILE, menu_cfg)
+        await interaction.response.send_message("Übersetzungsmenü gepostet.", ephemeral=True)
+
+    @app_commands.command(name="translatoraddprofile", description="Fügt ein neues Übersetzer-Profil hinzu")
+    @app_commands.describe(name="Profilname", style="Stilbeschreibung")
+    async def translatoraddprofile(self, interaction: discord.Interaction, name: str, style: str):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        nm = name.strip()
+        if not nm or nm in profiles:
+            return await interaction.response.send_message("Ungültiger oder existierender Name.", ephemeral=True)
+        profiles[nm] = style
+        save_json(PROFILES_FILE, profiles)
+        await interaction.response.send_message(f"Profil **{nm}** hinzugefügt.", ephemeral=True)
+
+    @app_commands.command(name="translatordeleteprofile", description="Löscht ein Übersetzer-Profil")
+    @app_commands.describe(name="Profilname")
+    async def translatordeleteprofile(self, interaction: discord.Interaction, name: str):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        if name not in profiles:
+            return await interaction.response.send_message(f"Profil `{name}` nicht gefunden.", ephemeral=True)
+        profiles.pop(name)
+        save_json(PROFILES_FILE, profiles)
+        await interaction.response.send_message(f"Profil **{name}** gelöscht.", ephemeral=True)
+
+    @app_commands.command(name="translatorsetcategorie", description="Setzt die Kategorie für Übersetzungs-Session-Channels")
+    @app_commands.describe(category="Kategorie")
+    async def translatorsetcategorie(self, interaction: discord.Interaction, category: discord.CategoryChannel):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        trans_cat_cfg["category_id"] = category.id
+        save_json(TRANS_CAT_FILE, trans_cat_cfg)
+        await interaction.response.send_message(f"Kategorie gesetzt: {category.name}", ephemeral=True)
+
+    @app_commands.command(name="translatorlog", description="Setzt den Log-Kanal für Übersetzungs-Session-Verläufe")
+    @app_commands.describe(channel="Text-Kanal für Logs")
+    async def translatorlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        menu_cfg["log_channel_id"] = channel.id
+        save_json(MENU_FILE, menu_cfg)
+        await interaction.response.send_message(f"Log-Kanal gesetzt: {channel.mention}", ephemeral=True)
+
+    @app_commands.command(name="translatorprompt", description="Fügt eine Regel zum Haupt-Prompt hinzu")
+    @app_commands.describe(text="Zusätzlicher Prompt-Text")
+    async def translatorprompt(self, interaction: discord.Interaction, text: str):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        save_json(PROMPT_FILE, {"addition": text})
+        await interaction.response.send_message(f"Prompt-Erweiterung gesetzt: **{text}**", ephemeral=True)
+
+    @app_commands.command(name="translatorpromptdelete", description="Entfernt die zusätzliche Prompt-Regel")
+    async def translatorpromptdelete(self, interaction: discord.Interaction):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        save_json(PROMPT_FILE, {"addition": ""})
+        await interaction.response.send_message("Prompt-Erweiterung entfernt.", ephemeral=True)
+
 async def setup(bot):
-    await bot.add_cog(Translation(bot))
+    await bot.add_cog(TranslationCog(bot))
