@@ -1,223 +1,232 @@
-from discord.ext import commands
-import discord
 from discord import app_commands
+import discord
+import json
+from utils import load_json, save_json, is_admin, get_member_by_id
 
-from utils import load_json, save_json, is_admin
+ALARM_CFG_FILE = "alarm_config.json"
+ALARM_USERS_FILE = "alarm_users.json"
+ALARM_LEAD_FILE = "alarm_lead.json"
+ALARM_LOG_FILE = "alarm_log_channel.json"
 
-ALARM_CONFIG = "persistent_data/alarm_config.json"
+def load_alarm_lead(guild_id):
+    return load_json(ALARM_LEAD_FILE, {}).get(str(guild_id))
 
-class Alarm(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+def save_alarm_lead(guild_id, user_id):
+    leads = load_json(ALARM_LEAD_FILE, {})
+    if user_id:
+        leads[str(guild_id)] = user_id
+    else:
+        leads.pop(str(guild_id), None)
+    save_json(ALARM_LEAD_FILE, leads)
 
-    def get_lead_id(self):
-        return load_json(ALARM_CONFIG, {}).get("lead_id", None)
+def load_alarm_roles(guild_id):
+    return load_json(ALARM_USERS_FILE, {}).get(str(guild_id), [])
 
-    def set_lead_id(self, uid):
-        cfg = load_json(ALARM_CONFIG, {})
-        cfg["lead_id"] = uid
-        save_json(ALARM_CONFIG, cfg)
+def save_alarm_roles(guild_id, roles):
+    users = load_json(ALARM_USERS_FILE, {})
+    users[str(guild_id)] = roles
+    save_json(ALARM_USERS_FILE, users)
 
-    def get_alarmusers_role(self):
-        return load_json(ALARM_CONFIG, {}).get("users_role_id", None)
+def load_alarm_log_channel(guild_id):
+    return load_json(ALARM_LOG_FILE, {}).get(str(guild_id))
 
-    def set_alarmusers_role(self, role_id):
-        cfg = load_json(ALARM_CONFIG, {})
-        cfg["users_role_id"] = role_id
-        save_json(ALARM_CONFIG, cfg)
+def save_alarm_log_channel(guild_id, channel_id):
+    logs = load_json(ALARM_LOG_FILE, {})
+    logs[str(guild_id)] = channel_id
+    save_json(ALARM_LOG_FILE, logs)
 
-    def remove_alarmusers_role(self):
-        cfg = load_json(ALARM_CONFIG, {})
-        cfg.pop("users_role_id", None)
-        save_json(ALARM_CONFIG, cfg)
-
-    def get_log_channel_id(self):
-        return load_json(ALARM_CONFIG, {}).get("log_channel_id", None)
-
-    def set_log_channel_id(self, cid):
-        cfg = load_json(ALARM_CONFIG, {})
-        cfg["log_channel_id"] = cid
-        save_json(ALARM_CONFIG, cfg)
-
-    def is_lead(self, user):
-        return is_admin(user) or user.id == self.get_lead_id()
-
-    # --- /AlarmLead [User] ---
-    @app_commands.command(name="alarmlead", description="Setze den AlarmLead (verantwortlicher Schichtmanager)")
-    @app_commands.describe(user="Nutzer, der AlarmLead werden soll")
-    async def alarmlead(self, interaction: discord.Interaction, user: discord.Member):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
-            return
-        self.set_lead_id(user.id)
-        await interaction.response.send_message(f"{user.mention} ist jetzt AlarmLead.", ephemeral=True)
-
-    # --- /AlarmLeadDelete ---
-    @app_commands.command(name="alarmleaddelete", description="Entfernt den AlarmLead")
-    async def alarmleaddelete(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
-            return
-        self.set_lead_id(None)
-        await interaction.response.send_message("AlarmLead entfernt.", ephemeral=True)
-
-    # --- /AlarmUsers [Role] ---
-    @app_commands.command(name="alarmusers", description="Setzt die Rolle für AlarmUser (kann Alarm-Schichten übernehmen)")
-    @app_commands.describe(role="Rolle für Alarm-Schichtübernahmen")
-    async def alarmusers(self, interaction: discord.Interaction, role: discord.Role):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
-            return
-        self.set_alarmusers_role(role.id)
-        await interaction.response.send_message(f"AlarmUsers-Rolle gesetzt: {role.mention}", ephemeral=True)
-
-    # --- /AlarmUsersDelete [Role] ---
-    @app_commands.command(name="alarmusersdelete", description="Entfernt die Rolle für AlarmUser")
-    @app_commands.describe(role="Rolle entfernen")
-    async def alarmusersdelete(self, interaction: discord.Interaction, role: discord.Role):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
-            return
-        if self.get_alarmusers_role() == role.id:
-            self.remove_alarmusers_role()
-            await interaction.response.send_message(f"{role.mention} ist nicht mehr AlarmUser-Rolle.", ephemeral=True)
-        else:
-            await interaction.response.send_message("Diese Rolle war nicht gesetzt.", ephemeral=True)
-
-    # --- /AlarmLog [Channel] ---
-    @app_commands.command(name="alarmlog", description="Setzt den Log-Channel für Alarm-Schichtanfragen")
-    @app_commands.describe(channel="Kanal für Alarm-Logs")
-    async def alarmlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("Keine Berechtigung.", ephemeral=True)
-            return
-        self.set_log_channel_id(channel.id)
-        await interaction.response.send_message(f"Alarm-Log-Channel gesetzt: {channel.mention}", ephemeral=True)
-
-    # --- /AlarmMain ---
-    @app_commands.command(name="alarmmain", description="Zeigt das Hauptmenü für Alarm-Schichtsystem")
-    async def alarmmain(self, interaction: discord.Interaction):
-        alarm_lead_id = self.get_lead_id()
-        is_lead = self.is_lead(interaction.user)
-
-        embed = discord.Embed(
-            title="🚨 Alarm-Schichtsystem",
-            description=(
-                "Drücke auf **Anfrage erstellen**, um eine neue Alarm-Schichtanfrage zu posten.\n\n"
-                "Du bist AlarmLead/Admin? Dann kannst du zusätzlich Schichten direkt zuteilen per Command."
-            ),
-            color=discord.Color.red()
-        )
-
-        view = AlarmMainView(self.bot, alarm_lead_id, is_lead)
-        await interaction.channel.send(embed=embed, view=view)
-        await interaction.response.send_message("Alarm-Schichtsystem gepostet.", ephemeral=True)
-
-    # --- /Alarmzuteilung [Nutzer] ---
-    @app_commands.command(name="alarmzuteilung", description="Teilt eine Alarm-Schicht direkt einem Nutzer zu (nur Lead/Admin).")
-    @app_commands.describe(nutzer="User, der eingeteilt werden soll")
-    async def alarmzuteilung(self, interaction: discord.Interaction, nutzer: discord.Member):
-        # Nur Lead/Admin dürfen das machen
-        if not self.is_lead(interaction.user):
-            await interaction.response.send_message("Nur AlarmLead/Admin dürfen diesen Befehl nutzen.", ephemeral=True)
-            return
-
-        # Modal für Streamer-Name & Schichtzeit
-        class ZuteilungModal(discord.ui.Modal, title="Alarm-Schicht zuteilen"):
-            streamer = discord.ui.TextInput(label="Name von Streamer", max_length=100)
-            schicht = discord.ui.TextInput(label="Schichtzeit (z.B. 19.06 06:00 - 12:00)", max_length=100)
-
-            async def on_submit(self, modal_inter):
-                log_id = load_json(ALARM_CONFIG, {}).get("log_channel_id")
-                log_ch = modal_inter.guild.get_channel(log_id) if log_id else None
-
-                msg = (
-                    f"{interaction.user.mention} hat {nutzer.mention} zur Schicht **{self.streamer.value}** "
-                    f"({self.schicht.value}) eingeteilt."
-                )
-                if log_ch:
-                    await log_ch.send(msg)
-                try:
-                    await nutzer.send(
-                        f"{interaction.user.mention} hat dich zur Schicht **{self.streamer.value}** "
-                        f"({self.schicht.value}) eingeteilt. Bitte erscheine 15 Minuten vorher im Discord General Channel."
-                    )
-                except Exception:
-                    pass
-                await modal_inter.response.send_message(f"{nutzer.mention} erfolgreich zur Schicht eingeteilt.", ephemeral=True)
-
-        await interaction.response.send_modal(ZuteilungModal())
-
-# ---- Hauptmenu View mit Anfrage erstellen Button ----
-class AlarmMainView(discord.ui.View):
-    def __init__(self, bot, alarm_lead_id, is_lead):
+class AlarmClaimView(discord.ui.View):
+    def __init__(self, alarm_info, lead_id, log_channel_id):
         super().__init__(timeout=None)
-        self.bot = bot
-        self.alarm_lead_id = alarm_lead_id
-        self.is_lead = is_lead
-
-    @discord.ui.button(label="Anfrage erstellen", style=discord.ButtonStyle.danger, custom_id="alarm_create")
-    async def create_alarm(self, interaction: discord.Interaction, button: discord.ui.Button):
-        class AlarmModal(discord.ui.Modal, title="Alarm-Schicht erstellen"):
-            streamer = discord.ui.TextInput(label="Name von Streamer", max_length=100)
-            schicht = discord.ui.TextInput(label="Schichtzeit (z.B. 19.06 06:00 - 12:00)", max_length=100)
-            async def on_submit(self, modal_inter):
-                role_id = load_json(ALARM_CONFIG, {}).get("users_role_id")
-                log_id = load_json(ALARM_CONFIG, {}).get("log_channel_id")
-                role_mention = f"<@&{role_id}>" if role_id else "@everyone"
-                log_ch = modal_inter.guild.get_channel(log_id) if log_id else None
-                embed = discord.Embed(
-                    title="🚨 Alarm-Schichtanfrage",
-                    description=(
-                        f"{role_mention}\n\n"
-                        f"**Dringend Chatter benötigt!**\n"
-                        f"**Streamer:** {self.streamer.value}\n"
-                        f"**Zeit:** {self.schicht.value}\n"
-                        "Klicke auf **Claim** um die Schicht zu übernehmen."
-                    ),
-                    color=discord.Color.red()
-                )
-                view = ClaimView(self.streamer.value, self.schicht.value, interaction.user)
-                post = await modal_inter.channel.send(embed=embed, view=view)
-                await modal_inter.response.send_message("Alarm-Schichtanfrage erstellt!", ephemeral=True)
-                if log_ch:
-                    await log_ch.send(f"Neue Alarm-Schichtanfrage: {post.jump_url}")
-
-        await interaction.response.send_modal(AlarmModal())
-
-# --- Claim Button View ---
-class ClaimView(discord.ui.View):
-    def __init__(self, streamer, schicht, lead):
-        super().__init__(timeout=None)
-        self.streamer = streamer
-        self.schicht = schicht
-        self.lead = lead
+        self.alarm_info = alarm_info
+        self.lead_id = lead_id
+        self.log_channel_id = log_channel_id
 
     @discord.ui.button(label="Claim", style=discord.ButtonStyle.success)
     async def claim(self, interaction: discord.Interaction, button: discord.ui.Button):
-        log_id = load_json(ALARM_CONFIG, {}).get("log_channel_id")
-        log_ch = interaction.guild.get_channel(log_id) if log_id else None
-        if log_ch:
-            await log_ch.send(
-                f"{interaction.user.mention} hat die Alarm-Schicht **{self.streamer}** ({self.schicht}) übernommen!"
-            )
-        try:
-            await interaction.user.send(
-                f"Du hast die Alarm-Schicht **{self.streamer}** ({self.schicht}) übernommen.\n"
-                "Bitte erscheine 15 Minuten vor Schichtbeginn im General Channel."
-            )
-        except Exception:
-            pass
-        try:
-            if self.lead:
-                await self.lead.send(
-                    f"{interaction.user.mention} hat die Alarm-Schicht **{self.streamer}** ({self.schicht}) geclaimt!"
-                )
-        except Exception:
-            pass
+        user = interaction.user
         await interaction.message.delete()
-        await interaction.response.send_message("Schicht übernommen! Check deine DMs.", ephemeral=True)
+        # DM an Claimenden
+        try:
+            await user.send(
+                f"**Danke fürs Übernehmen der Schicht!**\n\n"
+                f"Streamer: {self.alarm_info['streamer']}\n"
+                f"Schicht: {self.alarm_info['date']}, {self.alarm_info['time']}\n"
+                f"Bitte sei 15 Minuten vor Schichtbeginn im General-Discord-Channel."
+            )
+        except Exception:
+            pass
+        # Log an Log-Channel
+        guild = interaction.guild
+        if self.log_channel_id:
+            log_ch = guild.get_channel(self.log_channel_id)
+            if log_ch:
+                lead_mention = f"<@{self.lead_id}>" if self.lead_id else "(kein Lead gesetzt)"
+                await log_ch.send(
+                    f"✅ **Schicht übernommen!** {user.mention}\n"
+                    f"Streamer: {self.alarm_info['streamer']}\n"
+                    f"Zeit: {self.alarm_info['date']} {self.alarm_info['time']}\n"
+                    f"Lead: {lead_mention}"
+                )
+        await interaction.response.send_message("Schicht erfolgreich übernommen und DM gesendet!", ephemeral=True)
 
-# --- Cog Setup ---
+class AlarmMainView(discord.ui.View):
+    def __init__(self, lead_id):
+        super().__init__(timeout=None)
+        self.lead_id = lead_id
+
+    @discord.ui.button(label="Anfrage erstellen", style=discord.ButtonStyle.danger, custom_id="alarm_create_request")
+    async def create_request(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not (is_admin(interaction.user) or interaction.user.id == self.lead_id):
+            return await interaction.response.send_message(
+                "Nur der AlarmLead oder ein Admin kann eine Anfrage erstellen.", ephemeral=True)
+        modal = AlarmRequestModal(self.lead_id)
+        await interaction.response.send_modal(modal)
+
+class AlarmRequestModal(discord.ui.Modal, title="Neue Alarm-Schichtanfrage"):
+    streamer = discord.ui.TextInput(label="Name des Streamers", required=True)
+    date = discord.ui.TextInput(label="Datum", required=True, placeholder="z.B. Montag, 19.06.")
+    time = discord.ui.TextInput(label="Schichtzeit", required=True, placeholder="z.B. 06:00 - 12:00")
+    def __init__(self, lead_id):
+        super().__init__()
+        self.lead_id = lead_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        alarm_roles = load_alarm_roles(interaction.guild_id)
+        mention = " ".join([f"<@&{rid}>" for rid in alarm_roles]) if alarm_roles else "@everyone"
+        alarm_info = {
+            "streamer": self.streamer.value,
+            "date": self.date.value,
+            "time": self.time.value
+        }
+        view = AlarmClaimView(alarm_info, self.lead_id, load_alarm_log_channel(interaction.guild_id))
+        embed = discord.Embed(
+            title="🚨 Alarm-Schichtanfrage",
+            description=(
+                f"{mention}\n**Dringend Chatter benötigt!**\n\n"
+                f"Streamer: `{self.streamer.value}`\n"
+                f"Zeit: `{self.date.value}`\n"
+                f"Schicht: `{self.time.value}`\n\n"
+                "Klicke auf **Claim**, um die Schicht zu übernehmen!"
+            ),
+            color=discord.Color.orange()
+        )
+        await interaction.channel.send(embed=embed, view=view)
+        await interaction.response.send_message("Anfrage erstellt!", ephemeral=True)
+
+# ==== Befehle ====
+
+@app_commands.command(name="alarmmain", description="Postet das Alarm-Schichtsystem (nur für Lead/Admin).")
+async def alarmmain(interaction: discord.Interaction):
+    lead_id = load_alarm_lead(interaction.guild_id)
+    lead_mention = f"<@{lead_id}>" if lead_id else "*kein Lead gesetzt*"
+    embed = discord.Embed(
+        title="🚨 Alarm-Schichtsystem",
+        description=(
+            "Drücke auf **Anfrage erstellen**, um eine neue Alarm-Schichtanfrage zu posten.\n\n"
+            "Du bist AlarmLead/Admin? Dann kannst du zusätzlich Schichten direkt zuteilen per Command.\n\n"
+            "**Direkt-Schichtzuteilung:**\n"
+            "```/alarmzuteilung```"
+        ),
+        color=discord.Color.red()
+    )
+    embed.add_field(name="Aktueller AlarmLead", value=lead_mention)
+    await interaction.channel.send(embed=embed, view=AlarmMainView(lead_id))
+    await interaction.response.send_message("Alarm-Schichtsystem gepostet.", ephemeral=True)
+
+@app_commands.command(name="alarmlead", description="Setzt den AlarmLead (nur Admin)")
+@app_commands.describe(user="User, der Lead werden soll")
+async def alarmlead(interaction: discord.Interaction, user: discord.Member):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    save_alarm_lead(interaction.guild_id, user.id)
+    await interaction.response.send_message(f"{user.mention} ist jetzt AlarmLead!", ephemeral=True)
+
+@app_commands.command(name="alarmleadremove", description="Entfernt den AlarmLead")
+async def alarmleadremove(interaction: discord.Interaction):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    save_alarm_lead(interaction.guild_id, None)
+    await interaction.response.send_message("AlarmLead entfernt!", ephemeral=True)
+
+@app_commands.command(name="alarmleadinfo", description="Zeigt den aktuellen AlarmLead an")
+async def alarmleadinfo(interaction: discord.Interaction):
+    lead_id = load_alarm_lead(interaction.guild_id)
+    if lead_id:
+        await interaction.response.send_message(f"Aktueller AlarmLead: <@{lead_id}>", ephemeral=True)
+    else:
+        await interaction.response.send_message("Kein AlarmLead gesetzt!", ephemeral=True)
+
+@app_commands.command(name="alarmusers", description="Fügt eine Rolle zu den Alarm-Schicht-Usern hinzu")
+@app_commands.describe(role="Rolle für Alarm-Schicht")
+async def alarmusers(interaction: discord.Interaction, role: discord.Role):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    roles = set(load_alarm_roles(interaction.guild_id))
+    roles.add(role.id)
+    save_alarm_roles(interaction.guild_id, list(roles))
+    await interaction.response.send_message(f"Rolle {role.mention} für Alarm-Schicht hinzugefügt.", ephemeral=True)
+
+@app_commands.command(name="alarmusersdelete", description="Entfernt eine Rolle von den Alarm-Schicht-Usern")
+@app_commands.describe(role="Rolle entfernen")
+async def alarmusersdelete(interaction: discord.Interaction, role: discord.Role):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    roles = set(load_alarm_roles(interaction.guild_id))
+    roles.discard(role.id)
+    save_alarm_roles(interaction.guild_id, list(roles))
+    await interaction.response.send_message(f"Rolle {role.mention} entfernt.", ephemeral=True)
+
+@app_commands.command(name="alarmlog", description="Setzt den Log-Channel für Alarm-Schichtsystem")
+@app_commands.describe(channel="Kanal für Log")
+async def alarmlog(interaction: discord.Interaction, channel: discord.TextChannel):
+    if not is_admin(interaction.user):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    save_alarm_log_channel(interaction.guild_id, channel.id)
+    await interaction.response.send_message(f"Log-Channel gesetzt: {channel.mention}", ephemeral=True)
+
+@app_commands.command(name="alarmzuteilung", description="Weist einem User direkt eine Schicht zu (nur Lead/Admin)")
+@app_commands.describe(user="User, dem die Schicht zugewiesen wird")
+async def alarmzuteilung(interaction: discord.Interaction, user: discord.Member):
+    lead_id = load_alarm_lead(interaction.guild_id)
+    if not (is_admin(interaction.user) or interaction.user.id == lead_id):
+        return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+    # Modal für Schichtdaten
+    class AlarmZuteilungModal(discord.ui.Modal, title="Schicht direkt zuteilen"):
+        streamer = discord.ui.TextInput(label="Name des Streamers", required=True)
+        date = discord.ui.TextInput(label="Datum", required=True, placeholder="z.B. Montag, 19.06.")
+        time = discord.ui.TextInput(label="Schichtzeit", required=True, placeholder="z.B. 06:00 - 12:00")
+        async def on_submit(self, m_inter: discord.Interaction):
+            try:
+                await user.send(
+                    f"{interaction.user.display_name} hat dich zur Schicht eingeteilt!\n\n"
+                    f"Streamer: {self.streamer.value}\n"
+                    f"Datum: {self.date.value}\n"
+                    f"Zeit: {self.time.value}\n"
+                    f"Bitte erscheine 15 Minuten vor Schichtbeginn im General-Channel."
+                )
+            except Exception:
+                pass
+            log_ch_id = load_alarm_log_channel(interaction.guild_id)
+            if log_ch_id:
+                log_ch = interaction.guild.get_channel(log_ch_id)
+                if log_ch:
+                    await log_ch.send(
+                        f"🔔 {interaction.user.mention} hat {user.mention} zur Schicht eingeteilt.\n"
+                        f"Streamer: {self.streamer.value}\n"
+                        f"Datum: {self.date.value}\n"
+                        f"Zeit: {self.time.value}"
+                    )
+            await m_inter.response.send_message("Schicht erfolgreich eingeteilt & User informiert!", ephemeral=True)
+    await interaction.response.send_modal(AlarmZuteilungModal())
+
+# -- Setup function for extension loader --
 async def setup(bot):
-    await bot.add_cog(Alarm(bot))
+    bot.tree.add_command(alarmmain)
+    bot.tree.add_command(alarmlead)
+    bot.tree.add_command(alarmleadremove)
+    bot.tree.add_command(alarmleadinfo)
+    bot.tree.add_command(alarmusers)
+    bot.tree.add_command(alarmusersdelete)
+    bot.tree.add_command(alarmlog)
+    bot.tree.add_command(alarmzuteilung)
