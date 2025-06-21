@@ -770,14 +770,8 @@ def save_schicht_cfg(cfg):
 
 cfg = load_schicht_cfg()
 
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
-bot = commands.Bot(command_prefix="!", intents=intents)
-
-# ---------- Hilfsfunktionen ----------
-def is_admin(u):
-    return u.guild_permissions.administrator
+def is_admin(user):
+    return hasattr(user, "guild_permissions") and user.guild_permissions.administrator
 
 def member_has_erlaubte_rolle(member):
     erlaubte = set(cfg.get("rollen", []))
@@ -786,24 +780,30 @@ def member_has_erlaubte_rolle(member):
 def get_erlaubte_members(guild):
     return [m for m in guild.members if not m.bot and member_has_erlaubte_rolle(m)]
 
-# ---------- Slash-Commands Konfig ----------
+# ---------- Slash-Commands: Setup ----------
 @bot.tree.command(name="schichtrollen", description="Fügt eine Rolle zu erlaubten Schichtübergabe-Rollen hinzu")
 @app_commands.describe(role="Rolle, die für Schichtübergabe auswählbar ist")
 async def schichtrollen(inter: discord.Interaction, role: discord.Role):
     if not is_admin(inter.user):
         return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    cfg["rollen"] = list(set(cfg.get("rollen", []) + [role.id]))
-    save_schicht_cfg(cfg)
-    await inter.response.send_message(f"Rolle **{role.name}** ist jetzt auswählbar!", ephemeral=True)
+    if role.id not in cfg["rollen"]:
+        cfg["rollen"].append(role.id)
+        save_schicht_cfg(cfg)
+        await inter.response.send_message(f"Rolle **{role.name}** ist jetzt auswählbar!", ephemeral=True)
+    else:
+        await inter.response.send_message("Rolle war bereits erlaubt.", ephemeral=True)
 
 @bot.tree.command(name="schichtrollen_remove", description="Entfernt eine Rolle aus erlaubten Schichtübergabe-Rollen")
 @app_commands.describe(role="Rolle entfernen")
 async def schichtrollen_remove(inter: discord.Interaction, role: discord.Role):
     if not is_admin(inter.user):
         return await inter.response.send_message("Keine Berechtigung.", ephemeral=True)
-    cfg["rollen"] = [rid for rid in cfg.get("rollen", []) if rid != role.id]
-    save_schicht_cfg(cfg)
-    await inter.response.send_message(f"Rolle **{role.name}** wurde entfernt.", ephemeral=True)
+    if role.id in cfg["rollen"]:
+        cfg["rollen"].remove(role.id)
+        save_schicht_cfg(cfg)
+        await inter.response.send_message(f"Rolle **{role.name}** wurde entfernt.", ephemeral=True)
+    else:
+        await inter.response.send_message("Rolle war nicht freigegeben.", ephemeral=True)
 
 @bot.tree.command(name="schichtvoice", description="Setzt den VoiceMaster-Eingangskanal für Schichtübergabe")
 @app_commands.describe(channel="Voicekanal für Start der Übergabe")
@@ -847,12 +847,23 @@ async def schichtwechsel(inter: discord.Interaction, channel: discord.TextChanne
     await channel.send(embed=embed)
     await inter.response.send_message("Schichtübergabe-Anleitung gepostet!", ephemeral=True)
 
+# -------- Autocomplete: async! --------
+async def autocomplete_nutzer(inter: discord.Interaction, current: str):
+    guild = inter.guild
+    if not guild:
+        return []
+    members = get_erlaubte_members(guild)
+    results = []
+    for m in members:
+        if current.lower() in m.display_name.lower() or current.lower() in m.name.lower():
+            results.append(app_commands.Choice(name=m.display_name, value=m.display_name))
+    return results[:25]
+
 # ----------- Slash-Command: Schichtübergabe -----------
 @bot.tree.command(name="schichtuebergabe", description="Starte die Schichtübergabe an einen Nutzer mit Rollen-Filter")
 @app_commands.describe(nutzer="Name des Ziel-Nutzers")
-@app_commands.autocomplete(nutzer=lambda inter, current: autocomplete_nutzer(inter, current))
+@app_commands.autocomplete(nutzer=autocomplete_nutzer)
 async def schichtuebergabe(inter: discord.Interaction, nutzer: str):
-    # 1. Nutzer suchen
     guild = inter.guild
     allowed = get_erlaubte_members(guild)
     ziel = None
@@ -864,7 +875,7 @@ async def schichtuebergabe(inter: discord.Interaction, nutzer: str):
         return await inter.response.send_message("❌ Nutzer nicht gefunden oder hat keine erlaubte Rolle.", ephemeral=True)
     if ziel.id == inter.user.id:
         return await inter.response.send_message("❌ Du kannst dir selbst keine Schicht übergeben.", ephemeral=True)
-    # 2. Prüfen: Ziel-User online?
+    # Ziel-User online?
     if ziel.status != discord.Status.online and ziel.status != discord.Status.idle:
         try:
             await ziel.send(f"{inter.user.mention} wollte Schicht an dich übergeben – du warst aber offline. Melde dich bitte!")
@@ -872,7 +883,7 @@ async def schichtuebergabe(inter: discord.Interaction, nutzer: str):
         except Exception:
             await inter.response.send_message("Nutzer hat DMs deaktiviert – bitte kontaktiere ihn persönlich.", ephemeral=True)
         return
-    # 3. Voice-Prüfung
+    # Voice-Prüfung
     if not inter.user.voice or not inter.user.voice.channel:
         return await inter.response.send_message("Du musst in einem Sprachkanal sein, um die Schichtübergabe zu starten.", ephemeral=True)
     if not cfg.get("voice_id"):
@@ -884,7 +895,6 @@ async def schichtuebergabe(inter: discord.Interaction, nutzer: str):
         return await inter.response.send_message("Kann dich nicht in den VoiceMaster-Channel moven!", ephemeral=True)
     await inter.response.send_message(f"Du wurdest in den VoiceMaster-Eingang gemoved. Warte kurz auf {ziel.display_name}...", ephemeral=True)
     await asyncio.sleep(5)
-    # Zieluser moven in neuen Channel
     neu_chan = inter.user.voice.channel if inter.user.voice else None
     try:
         await ziel.move_to(neu_chan)
@@ -896,20 +906,7 @@ async def schichtuebergabe(inter: discord.Interaction, nutzer: str):
         logch = guild.get_channel(cfg["log_id"])
         if logch:
             await logch.send(f"✅ Schichtübergabe von **{inter.user.mention}** an **{ziel.mention}** abgeschlossen.")
-    # Abschlussinfo
     await inter.followup.send(f"✅ Schichtübergabe an {ziel.display_name} abgeschlossen!", ephemeral=True)
-
-# -------- Autocomplete Hilfsfunktion -----------
-async def autocomplete_nutzer(inter: discord.Interaction, current: str):
-    guild = inter.guild
-    if not guild:
-        return []
-    members = get_erlaubte_members(guild)
-    results = []
-    for m in members:
-        if current.lower() in m.display_name.lower() or current.lower() in m.name.lower():
-            results.append(app_commands.Choice(name=m.display_name, value=m.display_name))
-    return results[:25]  # Discord Limit!
 
 # ---------- Bot Startup ----------
 @bot.event
@@ -920,9 +917,6 @@ async def on_ready():
     except Exception as e:
         print("Sync Fehler:", e)
     print(f"Bot online als {bot.user}")
-
-# -------------- BOT RUN (Passe an) --------------
-# bot.run("YOUR_DISCORD_TOKEN")
 
 
 # =================== RAILWAY-PERSISTENZ/LOADER ====================
