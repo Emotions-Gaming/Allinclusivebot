@@ -12,6 +12,19 @@ intents.members = True
 intents.presences = True  # Das ist der Knackpunkt!
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+@bot.event
+async def on_ready():
+    # ALLE Commands auf dem Server entfernen:
+    guild = bot.get_guild(GUILD_ID)
+    await bot.tree.sync(guild=guild)
+    for cmd in bot.tree.get_commands(guild=guild):
+        await bot.tree.remove_command(cmd.name, guild=guild)
+    await bot.tree.sync(guild=guild)
+    print("Alte Commands entfernt und neu synchronisiert.")
+
+    # (danach diesen Code wieder rausnehmen!)
+
+
 # === ENV + CONFIG ===
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
