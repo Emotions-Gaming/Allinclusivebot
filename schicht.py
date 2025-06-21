@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-import asyncio  # Bugfix für das Verschieben!
+import asyncio
 from utils import load_json, save_json, is_admin
 
 SCHICHT_CONFIG_FILE = "persistent_data/schicht_config.json"
@@ -18,10 +18,41 @@ class Schicht(commands.Cog):
         })
         self.schicht_rights = set(load_json(SCHICHT_RIGHTS_FILE, []))
 
-    # ================== Schichtinfo posten =====================
+    # ========== Rollen für Zielnutzer-Filter (Schichtrollen) ==========
+    @app_commands.command(name="schichtaddrole", description="Fügt eine Rolle als Schichtrolle (Ziel für Übergabe) hinzu")
+    @app_commands.describe(role="Discord-Rolle, die als Ziel für Schichtübergabe auswählbar sein soll")
+    async def schichtaddrole(self, interaction: discord.Interaction, role: discord.Role):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        if role.id not in self.schicht_cfg["rollen"]:
+            self.schicht_cfg["rollen"].append(role.id)
+            save_json(SCHICHT_CONFIG_FILE, self.schicht_cfg)
+            await interaction.response.send_message(f"Rolle {role.mention} als Schichtrolle hinzugefügt.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"Rolle {role.mention} ist bereits Schichtrolle.", ephemeral=True)
 
+    @app_commands.command(name="schichtremoverole", description="Entfernt eine Rolle von den Schichtrollen")
+    @app_commands.describe(role="Discord-Rolle, die entfernt werden soll")
+    async def schichtremoverole(self, interaction: discord.Interaction, role: discord.Role):
+        if not is_admin(interaction.user):
+            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
+        if role.id in self.schicht_cfg["rollen"]:
+            self.schicht_cfg["rollen"].remove(role.id)
+            save_json(SCHICHT_CONFIG_FILE, self.schicht_cfg)
+            await interaction.response.send_message(f"Rolle {role.mention} als Schichtrolle entfernt.", ephemeral=True)
+        else:
+            await interaction.response.send_message(f"Rolle {role.mention} war keine Schichtrolle.", ephemeral=True)
+
+    # ================== Schichtinfo posten =====================
     @app_commands.command(name="schichtinfo", description="Postet Hinweise zur Schichtübergabe")
     async def schichtinfo(self, interaction: discord.Interaction):
+        rollen_names = []
+        guild = interaction.guild
+        for rid in self.schicht_cfg.get("rollen", []):
+            r = guild.get_role(rid)
+            if r:
+                rollen_names.append(r.mention)
+        rollen_txt = ", ".join(rollen_names) if rollen_names else "*(noch keine Schichtrollen definiert)*"
         embed = discord.Embed(
             title="👮‍♂️ Schichtübergabe – Hinweise",
             description=(
@@ -30,14 +61,14 @@ class Schicht(commands.Cog):
                 "1. Nutze den Command, während du im Voice bist\n"
                 "2. Der neue Nutzer muss im Discord & Voice-Channel online sein\n"
                 "3. Beide werden gemeinsam in den VoiceMaster-Kanal verschoben\n"
-                "4. Ab jetzt läuft die Übergabe – ggf. relevante Infos im Chat posten!"
+                "4. Ab jetzt läuft die Übergabe – ggf. relevante Infos im Chat posten!\n"
+                f"**Aktuelle Schichtrollen:** {rollen_txt}"
             ),
             color=discord.Color.blue()
         )
         await interaction.response.send_message(embed=embed)
 
     # ================== Rechte für Schichtübergabe steuern =====================
-
     @app_commands.command(name="schichtrolerights", description="Fügt eine Rolle als berechtigt für Schichtübergabe hinzu")
     @app_commands.describe(role="Rolle, die den Befehl ausführen darf")
     async def schichtrolerights(self, interaction: discord.Interaction, role: discord.Role):
@@ -62,6 +93,7 @@ class Schicht(commands.Cog):
     # ================== Schichtübergabe an Nutzer =====================
 
     async def schicht_user_autocomplete(self, interaction: discord.Interaction, current: str):
+        # Nur User, die eine der Schichtrollen haben, im Dropdown anzeigen!
         rollen = set(self.schicht_cfg.get("rollen", []))
         allowed = []
         for m in interaction.guild.members:
