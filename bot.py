@@ -756,7 +756,6 @@ async def on_ready():
     except Exception as e:
         print(f"Fehler bei der Command-Synchronisierung: {e}")
 
-
 import os
 import json
 import asyncio
@@ -927,9 +926,6 @@ async def schichtuebergabe(interaction: discord.Interaction, nutzer: str):
         await logchan.send(f"Schichtübergabe von {interaction.user.mention} an {target.mention} erfolgreich abgeschlossen.")
 
     await interaction.response.send_message(f"Schichtübergabe an {target.mention} abgeschlossen!", ephemeral=True)
-
-
-
 
 # =================== RAILWAY-PERSISTENZ/LOADER ====================
 import os
