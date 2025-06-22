@@ -21,6 +21,7 @@ def get_guild(bot: commands.Bot) -> Guild:
 # === Decorator für Command-Checks ===
 def has_permission_for(command_name):
     def predicate(func):
+        # WICHTIG: EXPLIZITE Typisierung für discord.py 2.5.x+!
         async def wrapper(self, interaction: Interaction, *args, **kwargs):
             # Admins immer Zugriff
             if is_admin(interaction.user):
@@ -35,8 +36,8 @@ def has_permission_for(command_name):
             if user_roles & allowed_roles:
                 return await func(self, interaction, *args, **kwargs)
             await interaction.response.send_message("❌ Du hast keine Berechtigung.", ephemeral=True)
-        # WICHTIG: Wrapper bekommt expliziten TypeHint (Discord.py verlangt das!)
-        wrapper.__annotations__ = func.__annotations__.copy()
+        # Typen für Discord.py erzwingen!
+        wrapper.__annotations__ = func.__annotations__.copy() if hasattr(func, "__annotations__") else {}
         wrapper.__annotations__["interaction"] = Interaction
         return wrapper
     return predicate
@@ -53,7 +54,7 @@ class PermissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         if not os.path.exists(PERMISSIONS_FILE):
-            save_json(PERMISSIONS_FILE, {})
+            save_json(PERMISSIONS_FILE, {})  # Initialisieren
 
     def _load(self):
         return load_json(PERMISSIONS_FILE, {})
@@ -61,22 +62,21 @@ class PermissionsCog(commands.Cog):
     def _save(self, data):
         save_json(PERMISSIONS_FILE, data)
 
+    # --- Alle verfügbaren Command-Namen (für Autocomplete) ---
     def available_commands(self):
-        cmds = set()
-        # Slash Commands aus allen Cogs (mit app_commands)
+        cmds = []
+        # Sammle alle Commands aus allen geladenen Cogs (mit Slash-Commands)
         for cog in self.bot.cogs.values():
-            # Optional: eigene Cogs können get_app_commands anbieten
             if hasattr(cog, 'get_app_commands'):
-                cmds.update(cog.get_app_commands())
-            # Fallback: alle registered Commands im app_commands-Baum
+                for cmd in cog.get_app_commands():
+                    cmds.append(cmd)
             if hasattr(cog, 'app_commands'):
                 for command in cog.app_commands:
                     if isinstance(command, app_commands.Command):
-                        cmds.add(command.name)
-        # Slash Commands auf Guild holen
+                        cmds.append(command.name)
         for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
-            cmds.add(cmd.name)
-        return sorted(cmds)
+            cmds.append(cmd.name)
+        return sorted(set(cmds))
 
     @app_commands.command(
         name="refreshpermissions",
@@ -97,14 +97,16 @@ class PermissionsCog(commands.Cog):
             name = command.name
             allowed_roles = config.get(name, [])
             try:
-                # Die Standardrollenberechtigung kann ggf. auf Discordseite (Guild-Command) gesetzt werden.
-                # Wir lassen es als Info und für weitere Custom-Logik hier stehen.
+                role_objs = [guild.get_role(rid) for rid in allowed_roles]
+                role_ids = [r.id for r in role_objs if r]
+                perms = app_commands.default_permissions()
+                await command.edit(guild=guild, default_member_permissions=perms, roles=role_ids)
                 synced += 1
             except Exception as e:
                 logging.error(f"Fehler beim Sync von Command {name}: {e}")
                 failed += 1
         await interaction.response.send_message(
-            f"🔄 Permissions refresh abgeschlossen: {synced} Command(s) verarbeitet, {failed} Fehler.", ephemeral=True
+            f"🔄 Permissions refresh abgeschlossen: {synced} Command(s) aktualisiert, {failed} Fehler.", ephemeral=True
         )
 
     @app_commands.command(
