@@ -129,6 +129,54 @@ class SetupBotCog(commands.Cog):
         await interaction.response.send_message("🚀 Setup als abgeschlossen markiert! Bot ist nun produktiv.", ephemeral=True)
 
 # === Setup-Funktion für Extension-Loader ===
+# --- Am ENDE von setupbot.py einfügen (nach dem SetupCog class) ---
+
+from discord import Embed, Color
+
+HELP_ENTRIES = [
+    ("/spacehelp", "Zeigt diese Hilfe an (alle wichtigen Commands mit Erklärung)."),
+    ("/strikegive [user]", "Vergibt einen Strike an einen Nutzer (Mod/Lead/Admin)."),
+    ("/strikeview", "Zeigt dir deine eigenen Strikes (privat)."),
+    ("/strikemaininfo", "Info-Panel zum Strikesystem posten (Teamleads/Admins)."),
+    ("/schichtuebergabe [Nutzer]", "Schicht an einen Nutzer übergeben (Schichtrolle/Admin)."),
+    ("/schichtmain", "Schicht-Panel (Ablauf + Copy) posten (Schichtrolle/Admin)."),
+    ("/alarmmain", "Alarm-Panel posten und Schichtanfrage starten (Lead/Admin)."),
+    ("/alarmzuteilung [Nutzer]", "Weise Schicht direkt einem Nutzer zu (Lead/Admin)."),
+    ("/translatorpost", "Übersetzungsmenü posten (Admin)."),
+    ("/wiki_page", "Aktuellen Channel als Wiki-Seite sichern (Admin)."),
+    ("/wiki_edit", "Wiki-Seite bearbeiten (Admin)."),
+    ("/wiki_backup", "Wiki-Backup wiederherstellen (Admin)."),
+    ("/backupnow", "Sichert alle Systemdaten sofort (Admin)."),
+    ("/restorenow", "Stellt Systemdaten aus Backup wieder her (Admin)."),
+    # Ergänze hier weitere Befehle!
+]
+
+from discord import app_commands, Interaction
+import os
+GUILD_ID = int(os.environ.get("GUILD_ID"))
+
+# Das hier INS SetupCog als Methode! (nach den anderen @app_commands.command Methoden)
+class SetupCog(commands.Cog):
+    # ...deine bisherigen Funktionen...
+
+    @app_commands.command(
+        name="spacehelp",
+        description="Zeigt eine Übersicht aller wichtigen Commands & Erklärungen"
+    )
+    @app_commands.guilds(GUILD_ID)
+    async def spacehelp(self, interaction: Interaction):
+        embed = Embed(
+            title="🛰️ Space Guide – Hilfe & Befehlsübersicht",
+            description="Hier findest du alle wichtigen Slash-Commands mit Erklärung. (Berechtigungen beachten!)",
+            color=Color.blurple()
+        )
+        for cmd, desc in HELP_ENTRIES:
+            embed.add_field(name=cmd, value=desc, inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# (restliche setupbot.py bleibt gleich)
+
+# --- ENDE EINBAU ---
 
 async def setup(bot):
     await bot.add_cog(SetupBotCog(bot))

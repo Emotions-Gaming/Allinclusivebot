@@ -20,7 +20,7 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 def log_event(msg, color=""):
-    # Optional: Farbcodes in Konsole
+    # Optionale Farbcodes für die Konsole
     colors = {
         "green": "\033[92m",
         "red": "\033[91m",
@@ -61,7 +61,7 @@ intents.message_content = True
 log_event("🛡️  Discord Intents aktiviert (members, guilds, message_content)", "gray")
 
 bot = commands.Bot(
-    command_prefix="!",  # Wird eh nicht benutzt (nur /-Commands!)
+    command_prefix="!",  # Nur für eventuelle Notfälle, sonst /-Commands
     intents=intents,
     help_command=None
 )
@@ -89,8 +89,8 @@ async def on_ready():
     # Commands vorher aufräumen (keine Ghosts)
     try:
         log_event("🔄 Entferne alte Slash-Commands auf Guild…", "gray")
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        await bot.tree.clear_commands(guild=None)  # Entfernt globale Commands
+        # Wichtig: Das entfernt ALLE Commands für die GUILD und setzt sie neu!
+        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         log_event("🟢 Slash-Commands nur noch GUILD-basiert!", "green")
     except Exception as ex:
         log_event(f"❌ Fehler beim Command-Sync: {ex}", "red")
@@ -116,7 +116,6 @@ async def on_ready():
         log_event(f"📋 Registrierte Slash-Commands auf diesem Server ({len(synced)}):", "blue")
         for cmd in synced:
             try:
-                # Rolle-Permissions finden
                 perms = []
                 if hasattr(cmd, "default_member_permissions") and cmd.default_member_permissions:
                     perms = [str(p) for p in cmd.default_member_permissions]
