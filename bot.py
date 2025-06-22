@@ -23,17 +23,20 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     try:
-        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-        print(f"🟢 Slash-Commands synchronisiert ({len(synced)}) für Guild-ID {GUILD_ID}")
+        guild = discord.Object(id=GUILD_ID)
+        # 1. Alle bisherigen Guild-Commands löschen
+        await bot.tree.sync(guild=guild)  # Initiales Sync, falls leer
+        await bot.tree.clear_commands(guild=guild)  # Wirklich alle raus!
+        await bot.tree.sync(guild=guild)  # Jetzt neu aufbauen!
+        print(f"🟢 Slash-Commands gelöscht & neu registriert für Guild-ID {GUILD_ID}")
     except Exception as e:
-        print(f"❌ Fehler beim Command-Sync: {e}")
+        print(f"❌ Fehler beim Synchronisieren der Commands: {e}")
     print(f"✅ Bot online: {bot.user} ({bot.user.id})")
     print("Alle Extensions geladen und ready!")
 
 # --- Main Funktion zum Laden der Extensions ---
 async def main():
     extensions = [
-        "utils",
         "persist",
         "permissions",
         "setupbot",      # <- Optional: nur aktiv, wenn du das Setup-System nutzt!
