@@ -43,6 +43,7 @@ class StrikeCog(commands.Cog):
         self.bot = bot
 
     # ==== Main Info (Embed für Mods/Admins) ====
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikemaininfo", description="Strike-Info für Teamleads/Mods posten")
     async def strikemaininfo(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -60,6 +61,7 @@ class StrikeCog(commands.Cog):
         await interaction.response.send_message("Strike-Hinweis für Mods/Admins gepostet!", ephemeral=True)
 
     # ==== Strike vergeben ====
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikegive", description="Vergibt einen Strike an einen User")
     @app_commands.describe(user="User der einen Strike bekommt")
     async def strikegive(self, interaction: discord.Interaction, user: discord.Member):
@@ -117,6 +119,7 @@ class StrikeCog(commands.Cog):
         await interaction.response.send_modal(StrikeModal())
 
     # ==== Strike-Log/Übersicht ====
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikelist", description="Setzt den Channel für die Strike-Übersicht")
     @app_commands.describe(channel="Channel für Strikes")
     async def strikelist(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -170,6 +173,7 @@ class StrikeCog(commands.Cog):
             await ch.send("-----------------")
 
     # ==== Rollenverwaltung (wer darf verwarnen?) ====
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikerole", description="Fügt eine Rolle zu den Strike-Berechtigten hinzu")
     @app_commands.describe(role="Discord Rolle")
     async def strikerole(self, interaction: discord.Interaction, role: discord.Role):
@@ -180,6 +184,7 @@ class StrikeCog(commands.Cog):
         save_strike_roles(strike_roles)
         await interaction.response.send_message(f"Rolle **{role.name}** ist jetzt Strike-Berechtigt.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikerole_remove", description="Entfernt eine Rolle von den Strike-Berechtigten")
     @app_commands.describe(role="Discord Rolle")
     async def strikerole_remove(self, interaction: discord.Interaction, role: discord.Role):
@@ -193,6 +198,7 @@ class StrikeCog(commands.Cog):
         else:
             await interaction.response.send_message(f"Rolle **{role.name}** war nicht Strike-Berechtigt.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikeaddrole", description="Setzt die automatische Rolle beim 3. Strike")
     @app_commands.describe(role="Rolle für automatisches Vergeben beim 3. Strike")
     async def strikeaddrole(self, interaction: discord.Interaction, role: discord.Role):
@@ -201,6 +207,7 @@ class StrikeCog(commands.Cog):
         save_autorole(role.id)
         await interaction.response.send_message(f"Die Rolle {role.mention} wird beim 3. Strike automatisch vergeben.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikeaddrole_remove", description="Entfernt die automatische Strike-Rolle")
     async def strikeaddrole_remove(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -209,6 +216,7 @@ class StrikeCog(commands.Cog):
         await interaction.response.send_message("Die automatische Strike-Rolle wurde entfernt.", ephemeral=True)
 
     # ==== Strikes entfernen, abfragen ====
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikedelete", description="Alle Strikes von User entfernen")
     @app_commands.describe(user="User zum Löschen")
     async def strikedelete(self, interaction: discord.Interaction, user: discord.Member):
@@ -223,6 +231,7 @@ class StrikeCog(commands.Cog):
         else:
             await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikeremove", description="Entfernt einen Strike")
     @app_commands.describe(user="User für Strike-Abbau")
     async def strikeremove(self, interaction: discord.Interaction, user: discord.Member):
@@ -242,6 +251,7 @@ class StrikeCog(commands.Cog):
         else:
             await interaction.response.send_message(f"{user.mention} hat keine Strikes.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="strikeview", description="Zeigt dir, wie viele Strikes du hast (privat)")
     async def strikeview(self, interaction: discord.Interaction):
         strikes = load_strikes()

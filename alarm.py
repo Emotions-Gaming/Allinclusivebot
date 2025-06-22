@@ -119,6 +119,7 @@ class AlarmCog(commands.Cog):
 
     # -- Slash-Befehle --
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmmain", description="Postet das Alarm-Schichtsystem-Panel")
     async def alarmmain(self, interaction: discord.Interaction):
         if not is_lead(interaction.user):
@@ -144,6 +145,7 @@ class AlarmCog(commands.Cog):
         save_alarm_cfg(cfg)
         await interaction.response.send_message("Alarm-Schichtsystem-Panel gepostet!", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmlead", description="Setzt einen Nutzer als AlarmLead")
     @app_commands.describe(nutzer="User der AlarmLead werden soll")
     async def alarmlead(self, interaction: discord.Interaction, nutzer: discord.Member):
@@ -155,6 +157,7 @@ class AlarmCog(commands.Cog):
         await self.update_panel(interaction.guild)
         await interaction.response.send_message(f"{nutzer.mention} ist jetzt AlarmLead.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmlead_remove", description="Entfernt den AlarmLead")
     @app_commands.describe(nutzer="Lead der entfernt werden soll")
     async def alarmlead_remove(self, interaction: discord.Interaction, nutzer: discord.Member):
@@ -169,6 +172,7 @@ class AlarmCog(commands.Cog):
         else:
             await interaction.response.send_message("Diese Person ist nicht Lead.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmlead_info", description="Zeigt den aktuellen AlarmLead")
     async def alarmlead_info(self, interaction: discord.Interaction):
         cfg = get_alarm_cfg()
@@ -178,6 +182,7 @@ class AlarmCog(commands.Cog):
         else:
             await interaction.response.send_message("Es ist kein AlarmLead gesetzt.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmusers_add", description="Fügt eine Rolle zur Alarm-Rolle hinzu (Ping bei Anfrage)")
     @app_commands.describe(role="Rolle hinzufügen")
     async def alarmusers_add(self, interaction: discord.Interaction, role: discord.Role):
@@ -190,6 +195,7 @@ class AlarmCog(commands.Cog):
         save_alarm_cfg(cfg)
         await interaction.response.send_message(f"{role.mention} ist jetzt Alarm-User.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmusers_remove", description="Entfernt eine Rolle aus der Alarm-Rolle")
     @app_commands.describe(role="Rolle entfernen")
     async def alarmusers_remove(self, interaction: discord.Interaction, role: discord.Role):
@@ -205,6 +211,7 @@ class AlarmCog(commands.Cog):
         else:
             await interaction.response.send_message("Rolle war nicht Alarm-User.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmlog", description="Setzt den Log-Channel für Alarm-Schichtanfragen")
     @app_commands.describe(channel="Log-Channel")
     async def alarmlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -215,6 +222,8 @@ class AlarmCog(commands.Cog):
         save_alarm_cfg(cfg)
         await interaction.response.send_message(f"Log-Channel gesetzt: {channel.mention}", ephemeral=True)
 
+
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="alarmzuteilung", description="(Lead) Teilt einem Nutzer direkt eine Schicht zu")
     @app_commands.describe(nutzer="Nutzer für Schicht")
     async def alarmzuteilung(self, interaction: discord.Interaction, nutzer: discord.Member):

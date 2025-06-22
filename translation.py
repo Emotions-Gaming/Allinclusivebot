@@ -52,6 +52,7 @@ class TranslationCog(commands.Cog):
     # ===============================
     # --- Übersetzungsmenü posten ---
     # ===============================
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatorpost", description="Postet das Übersetzungsmenü im aktuellen Kanal")
     async def translatorpost(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -151,6 +152,7 @@ class TranslationCog(commands.Cog):
 
     # ========== Admin: Profil-Management, Log-Channel, Prompt ==========
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatoraddprofile", description="Fügt ein neues Übersetzer-Profil hinzu")
     @app_commands.describe(name="Profilname", style="Stilbeschreibung")
     async def translatoraddprofile(self, interaction: discord.Interaction, name: str, style: str):
@@ -164,6 +166,7 @@ class TranslationCog(commands.Cog):
         save_json(PROFILES_FILE, profiles)
         await interaction.response.send_message(f"Profil **{nm}** hinzugefügt.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatordeleteprofile", description="Löscht ein Übersetzer-Profil")
     @app_commands.describe(name="Profilname")
     async def translatordeleteprofile(self, interaction: discord.Interaction, name: str):
@@ -176,6 +179,7 @@ class TranslationCog(commands.Cog):
         save_json(PROFILES_FILE, profiles)
         await interaction.response.send_message(f"Profil **{name}** gelöscht.", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatorsetcategorie", description="Setzt die Kategorie für Übersetzungs-Session-Channels")
     @app_commands.describe(category="Kategorie")
     async def translatorsetcategorie(self, interaction: discord.Interaction, category: discord.CategoryChannel):
@@ -184,6 +188,7 @@ class TranslationCog(commands.Cog):
         save_json(TRANS_CAT_FILE, {"category_id": category.id})
         await interaction.response.send_message(f"Kategorie gesetzt: {category.name}", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatorlog", description="Setzt den Log-Kanal für Übersetzungs-Session-Verläufe")
     @app_commands.describe(channel="Text-Kanal für Logs")
     async def translatorlog(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -194,6 +199,7 @@ class TranslationCog(commands.Cog):
         save_json(MENU_FILE, menu_cfg)
         await interaction.response.send_message(f"Log-Kanal gesetzt: {channel.mention}", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatorprompt", description="Fügt eine Regel zum Haupt-Prompt hinzu")
     @app_commands.describe(text="Zusätzlicher Prompt-Text")
     async def translatorprompt(self, interaction: discord.Interaction, text: str):
@@ -202,6 +208,7 @@ class TranslationCog(commands.Cog):
         save_json(PROMPT_FILE, {"addition": text})
         await interaction.response.send_message(f"Prompt-Erweiterung gesetzt: **{text}**", ephemeral=True)
 
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="translatorpromptdelete", description="Entfernt die zusätzliche Prompt-Regel")
     async def translatorpromptdelete(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -212,6 +219,7 @@ class TranslationCog(commands.Cog):
     # ==================
     #      ON_MESSAGE
     # ==================
+    @app_commands.guilds(GUILD_ID)
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         if message.author.bot or message.guild is None:

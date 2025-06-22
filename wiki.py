@@ -32,6 +32,7 @@ class WikiCog(commands.Cog):
         self.bot = bot
 
     # Setzt den Hauptkanal für das Wiki-Menü
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="wikimain", description="Setzt den Hauptkanal für das Wiki-Menü")
     @app_commands.describe(channel="Textkanal für das Wiki-Menü")
     async def wikimain(self, interaction: discord.Interaction, channel: discord.TextChannel):
@@ -42,6 +43,7 @@ class WikiCog(commands.Cog):
         await self.post_wiki_menu(channel)
 
     # Speichert den aktuellen Channel als Wiki-Seite und löscht ihn
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="wiki_page", description="Speichert den aktuellen Channel als Wiki-Seite und löscht ihn")
     async def wiki_page(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -78,6 +80,7 @@ class WikiCog(commands.Cog):
             "Keine passende Nachricht im Channel gefunden. Seite nicht gespeichert.", ephemeral=True)
 
     # Löscht eine Wiki-Seite
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="wiki_delete", description="Löscht eine Wiki-Seite")
     async def wiki_delete(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -100,6 +103,7 @@ class WikiCog(commands.Cog):
         await interaction.response.send_message("Wähle eine Seite zum Löschen:", view=view, ephemeral=True)
 
     # Bearbeite eine gespeicherte Wiki-Seite
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="wiki_edit", description="Bearbeite eine gespeicherte Wiki-Seite")
     async def wiki_edit(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -131,6 +135,7 @@ class WikiCog(commands.Cog):
         await interaction.response.send_message("Wähle eine Seite zum Bearbeiten:", view=view, ephemeral=True)
 
     # Stellt einzelne Wiki-Seiten als Channel wieder her
+    @app_commands.guilds(GUILD_ID)
     @app_commands.command(name="wiki_backup", description="Stellt einzelne Wiki-Seiten als Channel wieder her")
     async def wiki_backup_cmd(self, interaction: discord.Interaction):
         backup = get_wiki_backup()

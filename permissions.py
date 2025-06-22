@@ -7,7 +7,6 @@ from utils import load_json, save_json, is_admin
 COMMAND_PERMS_FILE = "commands_permissions.json"
 PERM_DATA_PATH = "persistent_data"
 
-# --- Hilfsfunktionen für Permission-Handling ---
 def get_perms():
     path = os.path.join(PERM_DATA_PATH, COMMAND_PERMS_FILE)
     return load_json(path, {})
@@ -15,6 +14,10 @@ def get_perms():
 def save_perms(perms):
     path = os.path.join(PERM_DATA_PATH, COMMAND_PERMS_FILE)
     save_json(path, perms)
+
+def get_command_name(command):
+    # Gibt den Namen eines Slash-Commands zurück (z.B. 'alarmmain')
+    return command.name if hasattr(command, 'name') else str(command)
 
 class PermissionCog(commands.Cog):
     def __init__(self, bot):
@@ -27,25 +30,25 @@ class PermissionCog(commands.Cog):
         perms = get_perms()
         guild = interaction.guild
 
-        # Gehe alle registrierten Commands durch
-        cmds = [cmd for cmd in self.bot.tree.get_commands(guild=guild) or self.bot.tree.get_commands()]
+        # Alle Guild-Befehle durchgehen
+        cmds = await self.bot.tree.fetch_commands(guild=guild)
+        updated = []
         for command in cmds:
-            c_name = command.name
+            c_name = get_command_name(command)
             allowed_role_ids = perms.get(c_name, [])
-            # Setze Permissions (Discord 2.3+ macht das per CommandSync und Permissions-API)
             try:
-                # Per Default: nur für Admins verfügbar
-                await command.edit(guild=guild, default_permission=False)
-                # Wenn Rollen gesetzt, gib nur diesen Zugriff
-                if allowed_role_ids:
-                    perms_obj = [
-                        discord.app_commands.CommandPermission(role_id, True, command) for role_id in allowed_role_ids
-                    ]
-                    await command.edit(guild=guild, permissions=perms_obj)
+                # Permissions: Setze auf guild-scope only
+                await self.bot.tree.set_permissions(command, guild=guild, permissions=[
+                    discord.app_commands.CommandPermission(role, True, command) for role in allowed_role_ids
+                ])
+                updated.append(f"/{c_name}")
             except Exception as e:
                 print(f"Fehler beim Setzen der Permissions für {c_name}: {e}")
 
-        await interaction.response.send_message("Permissions für alle Commands wurden aktualisiert.", ephemeral=True)
+        await interaction.response.send_message(
+            f"Permissions für folgende Commands wurden aktualisiert:\n" +
+            "\n".join(updated) if updated else "Keine Befehle aktualisiert.", ephemeral=True
+        )
 
     @app_commands.command(name="befehlpermission", description="Rolle zu einem Befehl hinzufügen (Admin)")
     @app_commands.describe(command="Name des Befehls", role="Rolle die erlaubt werden soll")
