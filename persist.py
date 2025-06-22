@@ -1,4 +1,4 @@
-import os
+ï»¿import os
 import shutil
 import discord
 from discord.ext import commands
@@ -38,12 +38,12 @@ class PersistCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="backupnow", description="Backup aller wichtigen Bot-Daten jetzt durchführen (Railway/Host)")
+    @app_commands.command(name="backupnow", description="Backup aller wichtigen Bot-Daten jetzt durchfÃ¼hren (Railway/Host)")
     async def backupnow(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
         ensure_persistence()
-        await interaction.response.send_message("Backup aller Daten durchgeführt!", ephemeral=True)
+        await interaction.response.send_message("Backup aller Daten durchgefÃ¼hrt!", ephemeral=True)
 
 async def setup(bot):
     ensure_persistence()   # Sofort sicherstellen!
