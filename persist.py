@@ -1,95 +1,117 @@
-﻿import os
+﻿# persist.py
+import os
 import shutil
-import discord
-from discord import app_commands, Interaction
-from discord.ext import tasks
-from .utils import load_json, save_json, is_admin
 import logging
+from discord.ext import commands
+from discord import app_commands, Interaction, Embed
+from utils import is_admin  # <-- nutzt Rechte-Check aus utils.py
+from utils import load_json, save_json
 
-logger = logging.getLogger(__name__)
+# === Konfiguration ===
 
-# Konfiguration
+PERSIST_DIR = "persistent_data"
+BACKUP_DIR = "railway_data_backup"
+
 DATA_FILES = [
     "strike_data.json",
+    "strike_roles.json",
+    "strike_autorole.json",
     "schicht_config.json",
-    "translator_menu.json",
-    "translation_log.json",
+    "alarm_config.json",
     "profiles.json",
+    "translator_menu.json",
+    "translator_prompt.json",
+    "trans_category.json",
+    "translation_log.json",
     "wiki_pages.json",
     "wiki_backup.json",
-    "alarm_config.json",
+    "wiki_main_channel.json",
     "commands_permissions.json",
     "setup_config.json",
+    # neue Dateien HIER ergänzen!
 ]
-LIVE_DIR = os.getenv("PERSISTENT_PATH", "persistent_data")
-BACKUP_DIR = os.getenv("BACKUP_PATH", "railway_data_backup")
 
-class PersistCog(discord.Cog):
-    """Cog für Datenpersistenz und Backup/Restore."""
-    def __init__(self, bot: discord.Client):
+DATA_FILES = [os.path.join(PERSIST_DIR, f) for f in DATA_FILES]
+BACKUP_FILES = [os.path.join(BACKUP_DIR, os.path.basename(f)) for f in DATA_FILES]
+
+# === Hilfsfunktionen ===
+
+def ensure_dirs():
+    """Stellt sicher, dass beide Verzeichnisse existieren."""
+    for d in (PERSIST_DIR, BACKUP_DIR):
+        if not os.path.exists(d):
+            os.makedirs(d)
+
+def file_exists(path):
+    return os.path.isfile(path)
+
+def backup_now():
+    """Kopiert alle Live-Daten ins Backup-Verzeichnis."""
+    ensure_dirs()
+    for src, dest in zip(DATA_FILES, BACKUP_FILES):
+        if file_exists(src):
+            shutil.copy2(src, dest)
+    logging.info("Backup erfolgreich durchgeführt.")
+
+def restore_now():
+    """Kopiert alle Backup-Daten zurück ins Live-Verzeichnis."""
+    ensure_dirs()
+    for src, dest in zip(BACKUP_FILES, DATA_FILES):
+        if file_exists(src):
+            shutil.copy2(src, dest)
+    logging.info("Restore erfolgreich durchgeführt.")
+
+def restore_missing_files():
+    """
+    Beim Bot-Start: Falls Datei im Live-System fehlt, wird sie (falls vorhanden) aus dem Backup-Verzeichnis wiederhergestellt.
+    """
+    ensure_dirs()
+    for src, dest in zip(BACKUP_FILES, DATA_FILES):
+        if not file_exists(dest) and file_exists(src):
+            shutil.copy2(src, dest)
+            logging.warning(f"{os.path.basename(dest)} fehlte und wurde aus Backup wiederhergestellt.")
+
+# === Cog / Extension ===
+
+class PersistCog(commands.Cog):
+    def __init__(self, bot):
         self.bot = bot
-        os.makedirs(LIVE_DIR, exist_ok=True)
-        os.makedirs(BACKUP_DIR, exist_ok=True)
-        self.auto_backup.start()
+        restore_missing_files()  # Startup-Check!
 
-    def cog_unload(self):
-        self.auto_backup.cancel()
-
-    @tasks.loop(hours=6)
-    async def auto_backup(self):
-        logger.info("Automatisches Backup gestartet...")
-        try:
-            for fname in DATA_FILES:
-                src = os.path.join(LIVE_DIR, fname)
-                dst = os.path.join(BACKUP_DIR, fname)
-                if os.path.isfile(src):
-                    shutil.copy2(src, dst)
-            logger.info("Automatisches Backup abgeschlossen.")
-        except Exception as e:
-            logger.error(f"Fehler im automatischen Backup: {e}")
-
-    @auto_backup.before_loop
-    async def before_auto(self):
-        await self.bot.wait_until_ready()
-
-    @app_commands.command(name="backupnow", description="Erstelle sofort ein Backup aller Daten")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(
+        name="backupnow",
+        description="Erstellt sofort ein Backup aller kritischen Daten (nur Admins)"
+    )
     async def backupnow(self, interaction: Interaction):
-        """Manuelles Backup aller persistenten Daten."""
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
+            return
         try:
-            for fname in DATA_FILES:
-                src = os.path.join(LIVE_DIR, fname)
-                dst = os.path.join(BACKUP_DIR, fname)
-                if os.path.isfile(src):
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copy2(src, dst)
-            await interaction.response.send_message("Backup aller Daten durchgeführt!", ephemeral=True)
+            backup_now()
+            await interaction.response.send_message("✅ Backup aller Daten erfolgreich durchgeführt!", ephemeral=True)
         except Exception as e:
-            logger.error(f"Fehler beim manuellen Backup: {e}")
-            await interaction.response.send_message(f"Fehler beim Backup: {e}", ephemeral=True)
+            logging.error(f"Backup-Fehler: {e}")
+            await interaction.response.send_message(f"❌ Fehler beim Backup: {e}", ephemeral=True)
 
-    @app_commands.command(name="restorenow", description="Stelle alle Daten aus dem letzten Backup wieder her")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(
+        name="restorenow",
+        description="Überschreibt ALLE Live-Daten mit dem letzten Backup! (nur Admins)"
+    )
     async def restorenow(self, interaction: Interaction):
-        """Restore aller Daten aus dem Backup-Ordner."""
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
+            return
         try:
-            for fname in DATA_FILES:
-                backup_file = os.path.join(BACKUP_DIR, fname)
-                live_file = os.path.join(LIVE_DIR, fname)
-                if os.path.isfile(backup_file):
-                    os.makedirs(os.path.dirname(live_file), exist_ok=True)
-                    shutil.copy2(backup_file, live_file)
-                else:
-                    logger.warning(f"Keine Backup-Datei für {fname} gefunden.")
-            await interaction.response.send_message("Restore abgeschlossen! Bitte Bot neu starten.", ephemeral=True)
+            restore_now()
+            await interaction.response.send_message(
+                "✅ Restore abgeschlossen! (Bitte Bot neu starten!)", ephemeral=True
+            )
         except Exception as e:
-            logger.error(f"Fehler beim Restore: {e}")
-            await interaction.response.send_message(f"Fehler beim Restore: {e}", ephemeral=True)
+            logging.error(f"Restore-Fehler: {e}")
+            await interaction.response.send_message(f"❌ Fehler beim Restore: {e}", ephemeral=True)
 
-@persist = PersistCog
+# === Setup-Funktion für Extension-Loader ===
 
-async def setup(bot: discord.Client):
-    cog = PersistCog(bot)
-    bot.add_cog(cog)
-    # Synchronisiere Slash-Commands
-    await bot.tree.sync(guild=discord.Object(id=int(bot.config.get('GUILD_ID'))))
+async def setup(bot):
+    await bot.add_cog(PersistCog(bot))
+

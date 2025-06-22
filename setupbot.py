@@ -1,108 +1,134 @@
-﻿import os
-import discord
-from discord import app_commands, Interaction
-from discord.ext import commands
-from .utils import load_json, save_json, is_admin
+﻿# setupbot.py
+
 import logging
+import os
+from discord.ext import commands
+from discord import app_commands, Interaction, TextChannel
+from utils import is_admin, load_json, save_json
 
-# Guild-Konstante
-guild_id = int(os.getenv("GUILD_ID"))
+SETUP_FILE = "persistent_data/setup_config.json"
 
-logger = logging.getLogger(__name__)
-CONFIG_FILE = "setup_config.json"
+# Liste der zu konfigurierenden Systeme und ihre JSON-Keys
+SYSTEMS = {
+    "translation": "translation_main_channel",
+    "wiki": "wiki_main_channel",
+    "schicht": "schicht_main_channel",
+    "alarm": "alarm_main_channel"
+}
 
-class SetupCog(commands.Cog):
-    """Geführtes Setup und Neustart-Menüs aller Subsysteme"""
-    def __init__(self, bot: commands.Bot):
+class SetupBotCog(commands.Cog):
+    def __init__(self, bot):
         self.bot = bot
-        data = load_json(CONFIG_FILE, {}) or {}
-        self.config = {
-            "translation_main_channel": data.get("translation_main_channel"),
-            "wiki_main_channel": data.get("wiki_main_channel"),
-            "schicht_main_channel": data.get("schicht_main_channel"),
-            "alarm_main_channel": data.get("alarm_main_channel"),
-            "setup_complete": data.get("setup_complete", False)
-        }
+        # Initialisiere Setup-Config falls nicht vorhanden
+        if not os.path.exists(SETUP_FILE):
+            save_json(SETUP_FILE, {k: None for k in SYSTEMS.values()})
 
-    def save(self):
-        save_json(CONFIG_FILE, self.config)
+    def _load(self):
+        return load_json(SETUP_FILE, {})
 
-    @app_commands.guilds(discord.Object(id=guild_id))
-    @app_commands.command(name="startsetup", description="Starte das geführte Admin-Setup")
-    @app_commands.checks.has_permissions(administrator=True)
+    def _save(self, data):
+        save_json(SETUP_FILE, data)
+
+    @app_commands.command(
+        name="startsetup",
+        description="Geführtes Setup: Konfiguriere alle Menü-Channels (nur Admins)"
+    )
     async def startsetup(self, interaction: Interaction):
-        await interaction.response.send_message("Starte Setup. Bitte antworte im Chat auf die Fragen.", ephemeral=True)
-        # Channel-Abfrage-Reihe
-        def check(m): return m.author == interaction.user and m.channel == interaction.channel
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
+            return
 
-        await interaction.followup.send("Bitte mentionne den Channel für das Übersetzungs-Menü.")
-        msg = await self.bot.wait_for('message', check=check, timeout=60)
-        self.config['translation_main_channel'] = msg.channel_mentions[0].id
+        config = self._load()
+        await interaction.response.send_message(
+            "🔧 Starte Setup – bitte folge den Anweisungen. Alle Antworten werden nur dir angezeigt.",
+            ephemeral=True
+        )
 
-        await interaction.followup.send("Bitte mentionne den Channel für das Wiki-Menü.")
-        msg = await self.bot.wait_for('message', check=check, timeout=60)
-        self.config['wiki_main_channel'] = msg.channel_mentions[0].id
+        def check(m):
+            return m.author.id == interaction.user.id and m.channel == interaction.channel
 
-        await interaction.followup.send("Bitte mentionne den Channel für das Schicht-Menü.")
-        msg = await self.bot.wait_for('message', check=check, timeout=60)
-        self.config['schicht_main_channel'] = msg.channel_mentions[0].id
+        # Fragt für jedes System den Channel ab
+        for system, key in SYSTEMS.items():
+            await interaction.followup.send(f"Bitte erwähne den Textkanal für das **{system}-Menü** (z.B. #channel):", ephemeral=True)
+            try:
+                msg = await self.bot.wait_for("message", check=check, timeout=120)
+            except Exception:
+                await interaction.followup.send(f"⏰ Timeout! Kein Channel für **{system}** erhalten.", ephemeral=True)
+                return
+            # Versuche Channel-ID aus Mention zu holen
+            channel_id = None
+            if msg.channel_mentions:
+                channel_id = msg.channel_mentions[0].id
+            else:
+                await interaction.followup.send(f"❌ Keine gültige Channel-Erwähnung erkannt. Bitte mit #channel antworten.", ephemeral=True)
+                return
+            config[key] = channel_id
+            self._save(config)
+            await interaction.followup.send(f"✅ {system}-Menü-Channel gesetzt: <#{channel_id}>", ephemeral=True)
 
-        await interaction.followup.send("Bitte mentionne den Channel für das Alarm-Panel.")
-        msg = await self.bot.wait_for('message', check=check, timeout=60)
-        self.config['alarm_main_channel'] = msg.channel_mentions[0].id
+        config["setup_complete"] = True
+        self._save(config)
+        await interaction.followup.send("🎉 Setup abgeschlossen! Menüs werden jetzt gepostet...", ephemeral=True)
 
-        self.config['setup_complete'] = True
-        self.save()
-        await interaction.followup.send("Setup abgeschlossen! Menüs werden in den Channels gepostet.")
+        # Postet die Menüs neu (ruft reload_menu in jedem Cog auf)
+        for cog_name in SYSTEMS:
+            cog = self.bot.get_cog(cog_name.capitalize() + "Cog")
+            if cog and hasattr(cog, "reload_menu"):
+                try:
+                    await cog.reload_menu()
+                except Exception as e:
+                    logging.error(f"Fehler beim reload_menu von {cog_name}: {e}")
 
-        # Poste alle Menüs neu
-        # Translation
-        trans_cog = self.bot.get_cog('TranslationCog')
-        if trans_cog:
-            channel = self.bot.get_channel(self.config['translation_main_channel'])
-            await trans_cog.translatorpost.callback(trans_cog, await channel.send)
-        # Wiki
-        wiki_cog = self.bot.get_cog('WikiCog')
-        if wiki_cog:
-            wiki_cog.main_channel_id = self.config['wiki_main_channel']
-            await wiki_cog.post_menu()
-        # Schicht
-        schicht_cog = self.bot.get_cog('SchichtCog')
-        if schicht_cog:
-            channel = self.bot.get_channel(self.config['schicht_main_channel'])
-            await channel.send("Schicht-Info neu laden mit /schichtinfo")
-        # Alarm
-        alarm_cog = self.bot.get_cog('AlarmCog')
-        if alarm_cog:
-            channel = self.bot.get_channel(self.config['alarm_main_channel'])
-            await channel.send("Alarm-Panel neu laden mit /alarmmain")
-
-    @app_commands.guilds(discord.Object(id=guild_id))
-    @app_commands.command(name="refreshposts", description="Postet alle Haupt-Menüs neu")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(
+        name="refreshposts",
+        description="Postet alle Menüpanels/Embeds neu in die hinterlegten Channels (nur Admins)"
+    )
     async def refreshposts(self, interaction: Interaction):
-        await interaction.response.send_message("Menüs werden neu gepostet.", ephemeral=True)
-        # Wiederhole Posting oben
-        await self.startsetup.callback(self, interaction)
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
+            return
+        for cog_name in SYSTEMS:
+            cog = self.bot.get_cog(cog_name.capitalize() + "Cog")
+            if cog and hasattr(cog, "reload_menu"):
+                try:
+                    await cog.reload_menu()
+                except Exception as e:
+                    logging.error(f"Fehler beim reload_menu von {cog_name}: {e}")
+        await interaction.response.send_message("🔄 Menüs wurden neu gepostet (sofern Cogs geladen und Funktion vorhanden).", ephemeral=True)
 
-    @app_commands.guilds(discord.Object(id=guild_id))
-    @app_commands.command(name="setupstatus", description="Zeigt Setup-Status an")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(
+        name="setupstatus",
+        description="Zeigt die aktuelle Setup-Konfiguration"
+    )
     async def setupstatus(self, interaction: Interaction):
-        embed = discord.Embed(title="Setup-Status")
-        for key, val in self.config.items():
-            embed.add_field(name=key, value=str(val), inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
+            return
+        config = self._load()
+        msg = "📋 **Aktueller Setup-Status:**\n"
+        for k in SYSTEMS.values():
+            v = config.get(k)
+            if v:
+                msg += f"- {k}: <#{v}>\n"
+            else:
+                msg += f"- {k}: *(Nicht gesetzt)*\n"
+        msg += f"- setup_complete: {config.get('setup_complete', False)}"
+        await interaction.response.send_message(msg, ephemeral=True)
 
-    @app_commands.guilds(discord.Object(id=guild_id))
-    @app_commands.command(name="startuse", description="Schalte Bot auf produktiv")
-    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(
+        name="startuse",
+        description="Setzt das Setup auf abgeschlossen (nur Admins)"
+    )
     async def startuse(self, interaction: Interaction):
-        self.config['setup_complete'] = True
-        self.save()
-        await interaction.response.send_message("Bot läuft jetzt produktiv.", ephemeral=True)
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
+            return
+        config = self._load()
+        config["setup_complete"] = True
+        self._save(config)
+        await interaction.response.send_message("🚀 Setup als abgeschlossen markiert! Bot ist nun produktiv.", ephemeral=True)
 
-async def setup(bot: commands.Bot):
-    cog = SetupCog(bot)
-    bot.add_cog(cog)
-    await bot.tree.sync(guild=discord.Object(id=guild_id))
+# === Setup-Funktion für Extension-Loader ===
+
+async def setup(bot):
+    await bot.add_cog(SetupBotCog(bot))

@@ -1,126 +1,134 @@
-﻿import os
+﻿# utils.py
 import json
-import tempfile
-import re
-from datetime import datetime
+import os
 import logging
-import discord
-from discord import Member, Guild
+from discord import Member, Guild, Role
+from typing import List, Any, Optional
 
-# Pfad zum Verzeichnis für persistente Daten
-tmp = os.getenv("PERSISTENT_PATH", "persistent_data")
-PERSISTENT_PATH = tmp if tmp.endswith(os.sep) else tmp + os.sep
+# =========================
+# 1. Rechte-Checks
+# =========================
 
-# Logging konfigurieren
-logger = logging.getLogger(__name__)
-
-# --- Directory sicherstellen ---
-if not os.path.isdir(PERSISTENT_PATH):
-    os.makedirs(PERSISTENT_PATH, exist_ok=True)
-
-# --- JSON-Helper ---
-
-def load_json(filename: str, fallback=None):
+def is_admin(user: Member) -> bool:
     """
-    Lädt eine JSON-Datei aus dem PERSISTENT_PATH.
-    Gibt fallback zurück, falls Datei fehlt oder fehlerhaft ist.
+    Prüft, ob der Nutzer die Administrator-Berechtigung hat.
     """
-    path = os.path.join(PERSISTENT_PATH, filename)
-    if not os.path.isfile(path):
-        return fallback
-    try:
-        with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        logger.error(f"Fehler beim Laden von json '{filename}': {e}")
-        return fallback
+    return any(role.permissions.administrator for role in user.roles)
 
-
-def save_json(filename: str, data):
+def has_role(user: Member, role_id: int) -> bool:
     """
-    Speichert ein Python-Objekt als JSON-Datei atomar im PERSISTENT_PATH.
+    Prüft, ob der Nutzer eine bestimmte Rolle hat.
     """
-    path = os.path.join(PERSISTENT_PATH, filename)
-    dirpath = os.path.dirname(path)
-    os.makedirs(dirpath, exist_ok=True)
-    # Atomare Speicherung über tempfile
-    try:
-        with tempfile.NamedTemporaryFile('w', delete=False, dir=dirpath, encoding='utf-8') as tf:
-            json.dump(data, tf, indent=2, ensure_ascii=False)
-            tempname = tf.name
-        os.replace(tempname, path)
-    except Exception as e:
-        logger.error(f"Fehler beim Speichern von json '{filename}': {e}")
-        raise
+    return any(role.id == role_id for role in user.roles)
 
-# --- Rechte-Checks ---
-
-def is_admin(member: Member) -> bool:
+def has_any_role(user: Member, role_ids: List[int]) -> bool:
     """
-    Prüft, ob ein Member Administrator-Rechte im Guild hat.
+    Prüft, ob der Nutzer mindestens eine Rolle aus einer Liste hat.
     """
-    try:
-        return member.guild_permissions.administrator
-    except Exception:
-        return False
+    user_role_ids = {role.id for role in user.roles}
+    return any(rid in user_role_ids for rid in role_ids)
 
+# =========================
+# 2. Member- und Rollen-Helfer
+# =========================
 
-def has_role(member: Member, role_id: int) -> bool:
+def get_member_by_id(guild: Guild, user_id: int) -> Optional[Member]:
     """
-    Prüft, ob der Member eine bestimmte Rolle besitzt.
+    Gibt das Member-Objekt zur User-ID zurück (oder None, wenn nicht gefunden).
     """
-    return any(role.id == role_id for role in member.roles)
+    return guild.get_member(user_id)
 
-
-def has_any_role(member: Member, role_ids: list[int]) -> bool:
+def mention_roles(guild: Guild, role_ids: List[int]) -> str:
     """
-    Prüft, ob der Member eine der Rollen in role_ids besitzt.
-    """
-    return any(role.id in role_ids for role in member.roles)
-
-# --- Member-Funktionen ---
-
-def get_member_by_id(guild: Guild, user_id: int) -> Member | None:
-    """
-    Liefert das Member-Objekt für eine gegebene User-ID, oder None.
-    """
-    member = guild.get_member(user_id)
-    if member:
-        return member
-    try:
-        return guild.fetch_member(user_id)
-    except Exception:
-        return None
-
-
-def mention_roles(guild: Guild, role_ids: list[int]) -> str:
-    """
-    Gibt eine durch Leerzeichen getrennte String-Liste von Role-Mentions zurück.
-    Rollen, die nicht mehr existieren, werden gefiltert.
+    Gibt eine formatierte @Mention-Liste für alle Rollen zurück (nur existierende Rollen).
     """
     mentions = []
     for rid in role_ids:
         role = guild.get_role(rid)
         if role:
             mentions.append(role.mention)
-    return ' '.join(mentions)
+    return " ".join(mentions) if mentions else "Keine Rollen gesetzt"
 
-# --- Sonstige Utilitys ---
+# =========================
+# 3. JSON-Helper
+# =========================
 
-def parse_mention(mention: str) -> int | None:
+def load_json(path: str, fallback: Any = None) -> Any:
     """
-    Extrahiert eine ID aus einem Discord-Mention-String wie <@123456789> oder <@&987654321>.
+    Lädt eine JSON-Datei (UTF-8) und gibt deren Inhalt als Python-Objekt zurück.
+    Falls Datei fehlt oder fehlerhaft, gibt fallback zurück.
     """
-    match = re.match(r'<@&?(\d+)>', mention)
+    if not os.path.exists(path):
+        return fallback if fallback is not None else {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logging.error(f"Fehler beim Laden von {path}: {e}")
+        return fallback if fallback is not None else {}
+
+def save_json(path: str, data: Any) -> None:
+    """
+    Speichert das Python-Objekt atomar als JSON an den gegebenen Pfad.
+    Erst als temp-Datei, dann rename (Schutz vor korrupten Daten).
+    """
+    dir_path = os.path.dirname(path)
+    if dir_path and not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+    temp_path = f"{path}.tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(temp_path, path)
+    except Exception as e:
+        logging.error(f"Fehler beim Speichern von {path}: {e}")
+
+# =========================
+# 4. Sonstige Utilities
+# =========================
+
+def parse_mention(s: str) -> Optional[int]:
+    """
+    Extrahiert eine User- oder Role-ID aus einem Mention-String.
+    Beispiel: '<@1234567890>' oder '<@!1234567890>' oder '<@&1234567890>'
+    """
+    import re
+    match = re.match(r"<@!?(\d+)>", s) or re.match(r"<@&(\d+)>", s)
     if match:
         return int(match.group(1))
     return None
 
+def to_display_time(dt) -> str:
+    """
+    Wandelt einen datetime-Objekt oder ISO-String/Timestamp in ein lesbares Format um.
+    """
+    from datetime import datetime
+    if isinstance(dt, (int, float)):
+        dt = datetime.fromtimestamp(dt)
+    elif isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except Exception:
+            return str(dt)
+    return dt.strftime("%d.%m.%Y, %H:%M")
 
-def to_display_time(dt: datetime) -> str:
+# =========================
+# 5. Erweiterbar für weitere Hilfsfunktionen
+# =========================
+
+# Beispiel: get_role_names(guild, role_ids)
+def get_role_names(guild: Guild, role_ids: List[int]) -> List[str]:
     """
-    Formatiert einen datetime in einen lesbaren Zeit-String.
+    Gibt die Namen der Rollen zurück (für Logging/Debug).
     """
-    if not isinstance(dt, datetime):
-        return str(dt)
-    return dt.strftime('%Y-%m-%d %H:%M:%S')
+    return [r.name for r in [guild.get_role(rid) for rid in role_ids] if r]
+
+# =========================
+# 6. Logging konfigurieren (einmal pro Bot-Prozess)
+# =========================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S"
+)
