@@ -1,4 +1,5 @@
-﻿import os
+﻿```python
+import os
 import logging
 import discord
 from discord.ext import commands
@@ -76,8 +77,20 @@ async def on_ready():
 
 # --- Starten ---
 if __name__ == '__main__':
-    try:
+    import asyncio
+
+    async def main():
+        # Extensions laden (async)
+        for ext in extensions:
+            try:
+                await bot.load_extension(ext)
+                logger.info("Extension geladen: %s", ext)
+            except Exception as e:
+                logger.exception("Fehler beim Laden von Extension %s: %s", ext, e)
         logger.info("Starte Bot...")
-        bot.run(token)
-    except Exception as e:
-        logger.exception("Bot konnte nicht gestartet werden: %s", e)
+        try:
+            await bot.start(token)
+        except Exception as e:
+            logger.exception("Bot konnte nicht gestartet werden: %s", e)
+
+    asyncio.run(main())
