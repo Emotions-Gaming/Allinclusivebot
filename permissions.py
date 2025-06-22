@@ -43,3 +43,6 @@ def has_permission_for(command_name):
         return any(role_id in user_role_ids for role_id in allowed_roles)
     return app_commands.check(predicate)
 
+# ... (deine Klasse PermissionsCog kommt davor)
+async def setup(bot):
+    await bot.add_cog(PermissionsCog(bot))
