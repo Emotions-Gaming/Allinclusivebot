@@ -1,5 +1,4 @@
-﻿```python
-import os
+﻿import os
 import logging
 import discord
 from discord.ext import commands
@@ -52,12 +51,22 @@ extensions = [
     'setupbot',
 ]
 logger.info("Extension-Liste: %s", extensions)
-for ext in extensions:
+
+import asyncio
+
+async def main():
+    # Extensions laden (async)
+    for ext in extensions:
+        try:
+            await bot.load_extension(ext)
+            logger.info("Extension geladen: %s", ext)
+        except Exception as e:
+            logger.exception("Fehler beim Laden von Extension %s: %s", ext, e)
+    logger.info("Starte Bot...")
     try:
-        bot.load_extension(ext)
-        logger.info("Extension geladen: %s", ext)
+        await bot.start(token)
     except Exception as e:
-        logger.exception("Fehler beim Laden von Extension %s: %s", ext, e)
+        logger.exception("Bot konnte nicht gestartet werden: %s", e)
 
 @bot.event
 async def on_ready():
@@ -75,22 +84,6 @@ async def on_ready():
     except Exception as e:
         logger.exception("Fehler beim Sync der Slash-Commands: %s", e)
 
-# --- Starten ---
+# --- Programmstart ---
 if __name__ == '__main__':
-    import asyncio
-
-    async def main():
-        # Extensions laden (async)
-        for ext in extensions:
-            try:
-                await bot.load_extension(ext)
-                logger.info("Extension geladen: %s", ext)
-            except Exception as e:
-                logger.exception("Fehler beim Laden von Extension %s: %s", ext, e)
-        logger.info("Starte Bot...")
-        try:
-            await bot.start(token)
-        except Exception as e:
-            logger.exception("Bot konnte nicht gestartet werden: %s", e)
-
     asyncio.run(main())
