@@ -1,11 +1,8 @@
-﻿# utils.py
-import json
+﻿import json
 import os
 import logging
 from discord import Member, Guild, Role
 from typing import List, Any, Optional
-
-
 
 # =========================
 # 1. Rechte-Checks
@@ -15,19 +12,22 @@ def is_admin(user: Member) -> bool:
     """
     Prüft, ob der Nutzer die Administrator-Berechtigung hat.
     """
-    return any(role.permissions.administrator for role in user.roles)
+    roles = getattr(user, "roles", [])
+    return any(getattr(role, "permissions", None) and role.permissions.administrator for role in roles)
 
 def has_role(user: Member, role_id: int) -> bool:
     """
     Prüft, ob der Nutzer eine bestimmte Rolle hat.
     """
-    return any(role.id == role_id for role in user.roles)
+    roles = getattr(user, "roles", [])
+    return any(role.id == role_id for role in roles)
 
 def has_any_role(user: Member, role_ids: List[int]) -> bool:
     """
     Prüft, ob der Nutzer mindestens eine Rolle aus einer Liste hat.
     """
-    user_role_ids = {role.id for role in user.roles}
+    roles = getattr(user, "roles", [])
+    user_role_ids = {role.id for role in roles}
     return any(rid in user_role_ids for rid in role_ids)
 
 # =========================
@@ -95,10 +95,8 @@ def parse_mention(s: str) -> Optional[int]:
     Beispiel: '<@1234567890>' oder '<@!1234567890>' oder '<@&1234567890>'
     """
     import re
-    match = re.match(r"<@!?(\d+)>", s) or re.match(r"<@&(\d+)>", s)
-    if match:
-        return int(match.group(1))
-    return None
+    m = re.match(r"<@!?(\d+)>", s) or re.match(r"<@&(\d+)>", s)
+    return int(m.group(1)) if m else None
 
 def to_display_time(dt) -> str:
     """
@@ -118,7 +116,6 @@ def to_display_time(dt) -> str:
 # 5. Erweiterbar für weitere Hilfsfunktionen
 # =========================
 
-# Beispiel: get_role_names(guild, role_ids)
 def get_role_names(guild: Guild, role_ids: List[int]) -> List[str]:
     """
     Gibt die Namen der Rollen zurück (für Logging/Debug).

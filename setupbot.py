@@ -1,16 +1,12 @@
-﻿# setupbot.py
-
-import logging
+﻿import logging
 import os
 from discord.ext import commands
-from discord import app_commands, Interaction, TextChannel
+from discord import app_commands, Interaction, Embed, Color
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
 
-
 SETUP_FILE = "persistent_data/setup_config.json"
 
-# Liste der zu konfigurierenden Systeme und ihre JSON-Keys
 SYSTEMS = {
     "translation": "translation_main_channel",
     "wiki": "wiki_main_channel",
@@ -18,10 +14,29 @@ SYSTEMS = {
     "alarm": "alarm_main_channel"
 }
 
+HELP_ENTRIES = [
+    ("/spacehelp", "Zeigt diese Hilfe an (alle wichtigen Commands mit Erklärung)."),
+    ("/strikegive [user]", "Vergibt einen Strike an einen Nutzer (Mod/Lead/Admin)."),
+    ("/strikeview", "Zeigt dir deine eigenen Strikes (privat)."),
+    ("/strikemaininfo", "Info-Panel zum Strikesystem posten (Teamleads/Admins)."),
+    ("/schichtuebergabe [Nutzer]", "Schicht an einen Nutzer übergeben (Schichtrolle/Admin)."),
+    ("/schichtmain", "Schicht-Panel (Ablauf + Copy) posten (Schichtrolle/Admin)."),
+    ("/alarmmain", "Alarm-Panel posten und Schichtanfrage starten (Lead/Admin)."),
+    ("/alarmzuteilung [Nutzer]", "Weise Schicht direkt einem Nutzer zu (Lead/Admin)."),
+    ("/translatorpost", "Übersetzungsmenü posten (Admin)."),
+    ("/wiki_page", "Aktuellen Channel als Wiki-Seite sichern (Admin)."),
+    ("/wiki_edit", "Wiki-Seite bearbeiten (Admin)."),
+    ("/wiki_backup", "Wiki-Backup wiederherstellen (Admin)."),
+    ("/backupnow", "Sichert alle Systemdaten sofort (Admin)."),
+    ("/restorenow", "Stellt Systemdaten aus Backup wieder her (Admin)."),
+    # Ergänze hier weitere Befehle!
+]
+
+GUILD_ID = int(os.environ.get("GUILD_ID"))
+
 class SetupBotCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        # Initialisiere Setup-Config falls nicht vorhanden
         if not os.path.exists(SETUP_FILE):
             save_json(SETUP_FILE, {k: None for k in SYSTEMS.values()})
 
@@ -50,7 +65,6 @@ class SetupBotCog(commands.Cog):
         def check(m):
             return m.author.id == interaction.user.id and m.channel == interaction.channel
 
-        # Fragt für jedes System den Channel ab
         for system, key in SYSTEMS.items():
             await interaction.followup.send(f"Bitte erwähne den Textkanal für das **{system}-Menü** (z.B. #channel):", ephemeral=True)
             try:
@@ -58,7 +72,6 @@ class SetupBotCog(commands.Cog):
             except Exception:
                 await interaction.followup.send(f"⏰ Timeout! Kein Channel für **{system}** erhalten.", ephemeral=True)
                 return
-            # Versuche Channel-ID aus Mention zu holen
             channel_id = None
             if msg.channel_mentions:
                 channel_id = msg.channel_mentions[0].id
@@ -73,7 +86,6 @@ class SetupBotCog(commands.Cog):
         self._save(config)
         await interaction.followup.send("🎉 Setup abgeschlossen! Menüs werden jetzt gepostet...", ephemeral=True)
 
-        # Postet die Menüs neu (ruft reload_menu in jedem Cog auf)
         for cog_name in SYSTEMS:
             cog = self.bot.get_cog(cog_name.capitalize() + "Cog")
             if cog and hasattr(cog, "reload_menu"):
@@ -134,37 +146,6 @@ class SetupBotCog(commands.Cog):
         self._save(config)
         await interaction.response.send_message("🚀 Setup als abgeschlossen markiert! Bot ist nun produktiv.", ephemeral=True)
 
-# === Setup-Funktion für Extension-Loader ===
-# --- Am ENDE von setupbot.py einfügen (nach dem SetupCog class) ---
-
-from discord import Embed, Color
-
-HELP_ENTRIES = [
-    ("/spacehelp", "Zeigt diese Hilfe an (alle wichtigen Commands mit Erklärung)."),
-    ("/strikegive [user]", "Vergibt einen Strike an einen Nutzer (Mod/Lead/Admin)."),
-    ("/strikeview", "Zeigt dir deine eigenen Strikes (privat)."),
-    ("/strikemaininfo", "Info-Panel zum Strikesystem posten (Teamleads/Admins)."),
-    ("/schichtuebergabe [Nutzer]", "Schicht an einen Nutzer übergeben (Schichtrolle/Admin)."),
-    ("/schichtmain", "Schicht-Panel (Ablauf + Copy) posten (Schichtrolle/Admin)."),
-    ("/alarmmain", "Alarm-Panel posten und Schichtanfrage starten (Lead/Admin)."),
-    ("/alarmzuteilung [Nutzer]", "Weise Schicht direkt einem Nutzer zu (Lead/Admin)."),
-    ("/translatorpost", "Übersetzungsmenü posten (Admin)."),
-    ("/wiki_page", "Aktuellen Channel als Wiki-Seite sichern (Admin)."),
-    ("/wiki_edit", "Wiki-Seite bearbeiten (Admin)."),
-    ("/wiki_backup", "Wiki-Backup wiederherstellen (Admin)."),
-    ("/backupnow", "Sichert alle Systemdaten sofort (Admin)."),
-    ("/restorenow", "Stellt Systemdaten aus Backup wieder her (Admin)."),
-    # Ergänze hier weitere Befehle!
-]
-
-from discord import app_commands, Interaction
-import os
-GUILD_ID = int(os.environ.get("GUILD_ID"))
-
-# Das hier INS SetupCog als Methode! (nach den anderen @app_commands.command Methoden)
-class SetupCog(commands.Cog):
-    # ...deine bisherigen Funktionen...
-
     @app_commands.command(
         name="spacehelp",
         description="Zeigt eine Übersicht aller wichtigen Commands & Erklärungen"
@@ -181,9 +162,6 @@ class SetupCog(commands.Cog):
             embed.add_field(name=cmd, value=desc, inline=False)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# (restliche setupbot.py bleibt gleich)
-
-# --- ENDE EINBAU ---
-
+# --- Extension-Loader ---
 async def setup(bot):
     await bot.add_cog(SetupBotCog(bot))

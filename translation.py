@@ -1,6 +1,4 @@
-﻿# translation.py
-
-import os
+﻿import os
 import logging
 import discord
 import asyncio
@@ -8,7 +6,6 @@ from discord.ext import commands
 from discord import app_commands, Interaction, TextChannel, CategoryChannel, Embed, Member
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
-
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 PROFILES_JSON = "persistent_data/profiles.json"
@@ -51,7 +48,6 @@ def _get_session_channel_name(profil, member):
     return f"translat-{profil.lower().replace(' ', '-')}-{member.name.lower()}"
 
 async def dummy_translate(text, prompt):
-    # Hier KI-API ersetzen – Demo: Einfach reversed string als "Übersetzung"
     await asyncio.sleep(1)
     return f"{text[::-1]} [Style:{prompt}]"
 
@@ -69,14 +65,12 @@ class TranslationCog(commands.Cog):
         channel = guild.get_channel(channel_id)
         if not channel:
             return
-        # Lösche alte Bot-Menüs
         async for msg in channel.history(limit=30):
             if msg.author == self.bot.user and msg.embeds and "Übersetzungsmenü" in (msg.embeds[0].title or ""):
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-        # Neues Menü posten
         embed = Embed(
             title="🌐 Übersetzungsmenü",
             description="Wähle einen Übersetzer-Stil aus, um deine Session zu starten.",
@@ -92,7 +86,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorpost")
-    async def translatorpost(self, interaction: Interaction):
+    async def translatorpost(self, interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -108,7 +102,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatoraddprofile")
-    async def translatoraddprofile(self, interaction: Interaction, name: str, stil: str):
+    async def translatoraddprofile(self, interaction, name, stil):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -127,7 +121,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatordeleteprofile")
-    async def translatordeleteprofile(self, interaction: Interaction, name: str):
+    async def translatordeleteprofile(self, interaction, name):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -146,7 +140,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorsetcategorie")
-    async def translatorsetcategorie(self, interaction: Interaction, category: CategoryChannel):
+    async def translatorsetcategorie(self, interaction, category):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -159,7 +153,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorlog")
-    async def translatorlog(self, interaction: Interaction, channel: TextChannel):
+    async def translatorlog(self, interaction, channel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -174,7 +168,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorprompt")
-    async def translatorprompt(self, interaction: Interaction, regel: str):
+    async def translatorprompt(self, interaction, regel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -187,7 +181,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorpromptdelete")
-    async def translatorpromptdelete(self, interaction: Interaction):
+    async def translatorpromptdelete(self, interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -257,7 +251,6 @@ class SessionEndView(discord.ui.View):
 
     @discord.ui.button(label="Session beenden & Verlauf senden", style=discord.ButtonStyle.red)
     async def end_session(self, interaction: Interaction, button: discord.ui.Button):
-        # Letzte 10 Übersetzungen sammeln
         messages = [msg async for msg in self.channel.history(limit=50) if msg.author == self.cog.bot.user and msg.embeds]
         last = messages[:10]
         menu = _load_menu()
@@ -287,15 +280,12 @@ class SessionEndView(discord.ui.View):
 async def on_message(self, message):
     if message.author.bot or not message.guild or not message.channel.category:
         return
-    # Prüfe, ob Channel eine Übersetzungssession ist
     category_id = _load_category()
     if not category_id or message.channel.category_id != category_id:
         return
-    # Prüfe Rechte
     if message.author != message.channel.recipient and not is_admin(message.author):
         return
 
-    # Profil aus Channel-Namen extrahieren
     parts = message.channel.name.split("-")
     if len(parts) < 3:
         return
@@ -304,7 +294,6 @@ async def on_message(self, message):
     if profil not in profiles:
         return
     prompt = profiles[profil] + "\n" + (_load_prompt() or "")
-    # Hier KI-API aufrufen:
     translated = await dummy_translate(message.content, prompt)
     embed = Embed(
         title="Übersetzung",
@@ -312,7 +301,6 @@ async def on_message(self, message):
         color=0x95a5a6
     )
     await message.channel.send(embed=embed)
-    # Log für diese Session speichern
     log = _load_log()
     uid = str(message.author.id)
     if uid not in log:

@@ -11,7 +11,6 @@ from datetime import datetime
 from dotenv import load_dotenv
 from permissions import has_permission_for
 
-
 # === Logging Setup ===
 logging.basicConfig(
     level=logging.INFO,
@@ -92,7 +91,7 @@ async def on_ready():
     try:
         log_event("🔄 Entferne alte Slash-Commands auf Guild…", "gray")
         # Wichtig: Das entfernt ALLE Commands für die GUILD und setzt sie neu!
-        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         log_event("🟢 Slash-Commands nur noch GUILD-basiert!", "green")
     except Exception as ex:
         log_event(f"❌ Fehler beim Command-Sync: {ex}", "red")

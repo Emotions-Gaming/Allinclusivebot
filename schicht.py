@@ -4,10 +4,9 @@ import os
 import logging
 import asyncio
 from discord.ext import commands
-from discord import app_commands, Interaction, Member, Role, VoiceChannel, TextChannel, Embed
+from discord import app_commands, Interaction, Embed
 from utils import is_admin, has_any_role, load_json, save_json
 from permissions import has_permission_for
-
 
 SCHICHT_CONFIG = "persistent_data/schicht_config.json"
 
@@ -21,7 +20,7 @@ def _load():
 def _save(data):
     save_json(SCHICHT_CONFIG, data)
 
-def is_schichtberechtigt(user: Member) -> bool:
+def is_schichtberechtigt(user):
     if is_admin(user):
         return True
     config = _load()
@@ -37,14 +36,12 @@ def get_log_channel(guild, config):
         return None
     return guild.get_channel(config["log_channel_id"])
 
-# GUILD_ID (aus ENV, wie überall)
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 
 class SchichtCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # Panel/Info-Embed für Anleitung
     async def reload_menu(self):
         config = _load()
         guild = self.bot.get_guild(GUILD_ID)
@@ -54,14 +51,12 @@ class SchichtCog(commands.Cog):
         channel = guild.get_channel(channel_id)
         if not channel:
             return
-        # Lösche alte Bot-Messages im Channel
         async for msg in channel.history(limit=30):
             if msg.author == self.bot.user and "Schichtübergabe – Hinweise" in (msg.content or ""):
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-        # Post neues Info-Panel
         text = (
             "👮‍♂️ **Schichtübergabe – Hinweise**\n\n"
             "Mit `/schichtuebergabe` kannst du die Schicht gezielt übergeben.\n\n"
@@ -94,7 +89,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtuebergabe")
-    async def schichtuebergabe(self, interaction: Interaction, ziel: Member):
+    async def schichtuebergabe(self, interaction: Interaction, ziel):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für eine Schichtübergabe.", ephemeral=True)
             return
@@ -106,7 +101,6 @@ class SchichtCog(commands.Cog):
             await interaction.response.send_message("❌ Ziel-Voice-Channel ist nicht gesetzt! Setze ihn zuerst mit /schichtsetvoice.", ephemeral=True)
             return
 
-        # Prüfe, ob beide User im Voice sind
         aufrufer_vc = interaction.user.voice.channel if interaction.user.voice else None
         ziel_vc = ziel.voice.channel if ziel.voice else None
         if not aufrufer_vc:
@@ -116,7 +110,6 @@ class SchichtCog(commands.Cog):
             await interaction.response.send_message(f"❌ {ziel.display_name} ist nicht im Voice-Channel!", ephemeral=True)
             return
 
-        # Zuerst den Caller verschieben, dann Ziel mit Delay
         try:
             await interaction.user.move_to(voice_channel)
         except Exception as e:
@@ -127,8 +120,7 @@ class SchichtCog(commands.Cog):
             f"Du wurdest in **{voice_channel.name}** verschoben. {ziel.mention} folgt gleich für die Schichtübergabe.", ephemeral=True
         )
 
-        await asyncio.sleep(2)  # Kurze Wartezeit, dann Ziel verschieben
-
+        await asyncio.sleep(2)
         try:
             await ziel.move_to(voice_channel)
             await ziel.send(f"Du wurdest zur Schichtübergabe in **{voice_channel.name}** verschoben.")
@@ -138,7 +130,6 @@ class SchichtCog(commands.Cog):
             )
             return
 
-        # Logging
         log_channel = get_log_channel(guild, config)
         if log_channel:
             embed = Embed(
@@ -155,7 +146,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtsetrolle")
-    async def schichtsetrolle(self, interaction: Interaction, rolle: Role):
+    async def schichtsetrolle(self, interaction: Interaction, rolle):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen Rollen setzen.", ephemeral=True)
             return
@@ -172,7 +163,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtremoverolle")
-    async def schichtremoverolle(self, interaction: Interaction, rolle: Role):
+    async def schichtremoverolle(self, interaction: Interaction, rolle):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen Rollen entfernen.", ephemeral=True)
             return
@@ -192,7 +183,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtsetvoice")
-    async def schichtsetvoice(self, interaction: Interaction, voice_channel: VoiceChannel):
+    async def schichtsetvoice(self, interaction: Interaction, voice_channel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen den Ziel-Voice-Channel setzen.", ephemeral=True)
             return
@@ -207,7 +198,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtsetlog")
-    async def schichtsetlog(self, interaction: Interaction, log_channel: TextChannel):
+    async def schichtsetlog(self, interaction: Interaction, log_channel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen den Log-Channel setzen.", ephemeral=True)
             return
@@ -237,8 +228,6 @@ class SchichtCog(commands.Cog):
         msg += "- Ziel-Voice-Channel: " + (voice.mention if voice else "*Nicht gesetzt*") + "\n"
         msg += "- Log-Channel: " + (log.mention if log else "*Nicht gesetzt*")
         await interaction.response.send_message(msg, ephemeral=True)
-
-# === Setup-Funktion für Extension-Loader ===
 
 async def setup(bot):
     await bot.add_cog(SchichtCog(bot))

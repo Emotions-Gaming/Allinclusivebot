@@ -1,15 +1,11 @@
-﻿# persist.py
-import os
+﻿import os
 import shutil
 import logging
 from discord.ext import commands
-from discord import app_commands, Interaction, Embed
+from discord import app_commands, Embed
 from utils import is_admin  # <-- nutzt Rechte-Check aus utils.py
 from utils import load_json, save_json
 from permissions import has_permission_for
-
-
-# === Konfiguration ===
 
 PERSIST_DIR = "persistent_data"
 BACKUP_DIR = "railway_data_backup"
@@ -35,8 +31,6 @@ DATA_FILES = [
 
 DATA_FILES = [os.path.join(PERSIST_DIR, f) for f in DATA_FILES]
 BACKUP_FILES = [os.path.join(BACKUP_DIR, os.path.basename(f)) for f in DATA_FILES]
-
-# === Hilfsfunktionen ===
 
 def ensure_dirs():
     """Stellt sicher, dass beide Verzeichnisse existieren."""
@@ -73,8 +67,6 @@ def restore_missing_files():
             shutil.copy2(src, dest)
             logging.warning(f"{os.path.basename(dest)} fehlte und wurde aus Backup wiederhergestellt.")
 
-# === Cog / Extension ===
-
 class PersistCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -85,7 +77,7 @@ class PersistCog(commands.Cog):
         description="Erstellt sofort ein Backup aller kritischen Daten (nur Admins)"
     )
     @has_permission_for("backupnow")
-    async def backupnow(self, interaction: Interaction):
+    async def backupnow(self, interaction):  # Typen entfernen!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
             return
@@ -101,7 +93,7 @@ class PersistCog(commands.Cog):
         description="Überschreibt ALLE Live-Daten mit dem letzten Backup! (nur Admins)"
     )
     @has_permission_for("restorenow")
-    async def restorenow(self, interaction: Interaction):
+    async def restorenow(self, interaction):  # Typen entfernen!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
             return
@@ -114,8 +106,5 @@ class PersistCog(commands.Cog):
             logging.error(f"Restore-Fehler: {e}")
             await interaction.response.send_message(f"❌ Fehler beim Restore: {e}", ephemeral=True)
 
-# === Setup-Funktion für Extension-Loader ===
-
 async def setup(bot):
     await bot.add_cog(PersistCog(bot))
-
