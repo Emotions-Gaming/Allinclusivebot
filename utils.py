@@ -4,7 +4,6 @@ import os
 import logging
 from discord import Member, Guild, Role
 from typing import List, Any, Optional
-from common_utils import is_admin
 
 
 

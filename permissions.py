@@ -5,7 +5,6 @@ import logging
 from discord.ext import commands
 from discord import app_commands, Interaction, Role, Guild
 from utils import is_admin, load_json, save_json, mention_roles
-from common_utils import is_admin
 
 
 PERMISSIONS_FILE = "persistent_data/commands_permissions.json"
