@@ -1,98 +1,108 @@
 ﻿import os
 import discord
+from discord import app_commands, Interaction
 from discord.ext import commands
-from discord import app_commands
-from utils import load_json, save_json, is_admin
+from .utils import load_json, save_json, is_admin
+import logging
 
-SETUP_FILE = "setup_config.json"
+# Guild-Konstante
+guild_id = int(os.getenv("GUILD_ID"))
 
-def get_config():
-    return load_json(SETUP_FILE, {})
-
-def set_config(data):
-    save_json(SETUP_FILE, data)
+logger = logging.getLogger(__name__)
+CONFIG_FILE = "setup_config.json"
 
 class SetupCog(commands.Cog):
-    def __init__(self, bot):
+    """Geführtes Setup und Neustart-Menüs aller Subsysteme"""
+    def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.config = get_config()
+        data = load_json(CONFIG_FILE, {}) or {}
+        self.config = {
+            "translation_main_channel": data.get("translation_main_channel"),
+            "wiki_main_channel": data.get("wiki_main_channel"),
+            "schicht_main_channel": data.get("schicht_main_channel"),
+            "alarm_main_channel": data.get("alarm_main_channel"),
+            "setup_complete": data.get("setup_complete", False)
+        }
 
-    @app_commands.command(name="startsetup", description="Geführtes Setup für alle Bot-Systeme (Admin only)")
-    async def startsetup(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        await interaction.response.send_message("Starte geführtes Setup. Bitte folge den Anweisungen.", ephemeral=True)
+    def save(self):
+        save_json(CONFIG_FILE, self.config)
 
-        steps = [
-            ("translation_main_channel", "Bitte erwähne den Channel, in dem das Übersetzungsmenü gepostet werden soll (z.B. #translation)."),
-            ("wiki_main_channel", "Bitte erwähne den Channel, in dem das Wiki-Menü gepostet werden soll (z.B. #wiki)."),
-            ("schicht_main_channel", "Bitte erwähne den Channel, in dem das Schichtsystem-Menü gepostet werden soll (z.B. #schicht)."),
-            ("alarm_main_channel", "Bitte erwähne den Channel, in dem das Alarm-Schichtsystem-Menü gepostet werden soll (z.B. #alarm).")
-        ]
-        config = get_config()
+    @app_commands.guilds(discord.Object(id=guild_id))
+    @app_commands.command(name="startsetup", description="Starte das geführte Admin-Setup")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def startsetup(self, interaction: Interaction):
+        await interaction.response.send_message("Starte Setup. Bitte antworte im Chat auf die Fragen.", ephemeral=True)
+        # Channel-Abfrage-Reihe
+        def check(m): return m.author == interaction.user and m.channel == interaction.channel
 
-        for key, msg in steps:
-            await interaction.followup.send(msg, ephemeral=True)
-            try:
-                def check(m): return m.author == interaction.user and m.channel == interaction.channel
-                m = await self.bot.wait_for("message", check=check, timeout=90)
-                if m.channel_mentions:
-                    channel = m.channel_mentions[0]
-                    config[key] = channel.id
-                    await m.reply(f"Channel `{channel.name}` gespeichert.", mention_author=False)
-                else:
-                    await m.reply("Kein Channel erkannt. Bitte als #channel senden.")
-                    return
-            except Exception:
-                await interaction.followup.send("Timeout! Bitte Setup erneut starten.", ephemeral=True)
-                return
+        await interaction.followup.send("Bitte mentionne den Channel für das Übersetzungs-Menü.")
+        msg = await self.bot.wait_for('message', check=check, timeout=60)
+        self.config['translation_main_channel'] = msg.channel_mentions[0].id
 
-        set_config(config)
-        await self._refresh_all_menus(config, interaction.guild)
-        await interaction.followup.send("Setup abgeschlossen & Menüs neu gepostet! Nutze `/refreshposts`, falls du sie später neu posten willst.", ephemeral=True)
+        await interaction.followup.send("Bitte mentionne den Channel für das Wiki-Menü.")
+        msg = await self.bot.wait_for('message', check=check, timeout=60)
+        self.config['wiki_main_channel'] = msg.channel_mentions[0].id
 
-    async def _refresh_all_menus(self, config, guild):
-        # Annahme: Jedes System hat reload_menu(chan) (guild-gebunden!)
-        for system, key in [
-            ("translation", "translation_main_channel"),
-            ("wiki", "wiki_main_channel"),
-            ("schicht", "schicht_main_channel"),
-            ("alarm", "alarm_main_channel")
-        ]:
-            try:
-                chan = guild.get_channel(config.get(key))
-                if chan is None:
-                    continue
-                ext = self.bot.get_cog(system.capitalize() + "Cog")
-                if ext and hasattr(ext, "reload_menu"):
-                    await ext.reload_menu(chan)
-            except Exception as e:
-                print(f"[SetupBot] Fehler beim Reload von {system}: {e}")
+        await interaction.followup.send("Bitte mentionne den Channel für das Schicht-Menü.")
+        msg = await self.bot.wait_for('message', check=check, timeout=60)
+        self.config['schicht_main_channel'] = msg.channel_mentions[0].id
 
-    @app_commands.command(name="refreshposts", description="Postet alle Menüs erneut (nach Update/Fehler)")
-    async def refreshposts(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        config = get_config()
-        await self._refresh_all_menus(config, interaction.guild)
-        await interaction.response.send_message("Alle Menüs wurden neu gepostet und IDs gespeichert.", ephemeral=True)
+        await interaction.followup.send("Bitte mentionne den Channel für das Alarm-Panel.")
+        msg = await self.bot.wait_for('message', check=check, timeout=60)
+        self.config['alarm_main_channel'] = msg.channel_mentions[0].id
 
-    @app_commands.command(name="setupstatus", description="Zeigt aktuellen Setup-Status")
-    async def setupstatus(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        config = get_config()
-        text = "\n".join([f"**{k}**: {v}" for k, v in config.items()])
-        await interaction.response.send_message(f"Aktueller Setup-Status:\n{text}", ephemeral=True)
+        self.config['setup_complete'] = True
+        self.save()
+        await interaction.followup.send("Setup abgeschlossen! Menüs werden in den Channels gepostet.")
 
-    @app_commands.command(name="startuse", description="Schaltet den Bot in Produktivmodus (nach Setup) (Admin only)")
-    async def startuse(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            return await interaction.response.send_message("Keine Berechtigung!", ephemeral=True)
-        config = get_config()
-        config["setup_complete"] = True
-        set_config(config)
-        await interaction.response.send_message("Bot ist jetzt im Produktivmodus! Alle Systeme sind aktiv.", ephemeral=True)
+        # Poste alle Menüs neu
+        # Translation
+        trans_cog = self.bot.get_cog('TranslationCog')
+        if trans_cog:
+            channel = self.bot.get_channel(self.config['translation_main_channel'])
+            await trans_cog.translatorpost.callback(trans_cog, await channel.send)
+        # Wiki
+        wiki_cog = self.bot.get_cog('WikiCog')
+        if wiki_cog:
+            wiki_cog.main_channel_id = self.config['wiki_main_channel']
+            await wiki_cog.post_menu()
+        # Schicht
+        schicht_cog = self.bot.get_cog('SchichtCog')
+        if schicht_cog:
+            channel = self.bot.get_channel(self.config['schicht_main_channel'])
+            await channel.send("Schicht-Info neu laden mit /schichtinfo")
+        # Alarm
+        alarm_cog = self.bot.get_cog('AlarmCog')
+        if alarm_cog:
+            channel = self.bot.get_channel(self.config['alarm_main_channel'])
+            await channel.send("Alarm-Panel neu laden mit /alarmmain")
 
-async def setup(bot):
-    await bot.add_cog(SetupCog(bot))
+    @app_commands.guilds(discord.Object(id=guild_id))
+    @app_commands.command(name="refreshposts", description="Postet alle Haupt-Menüs neu")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def refreshposts(self, interaction: Interaction):
+        await interaction.response.send_message("Menüs werden neu gepostet.", ephemeral=True)
+        # Wiederhole Posting oben
+        await self.startsetup.callback(self, interaction)
+
+    @app_commands.guilds(discord.Object(id=guild_id))
+    @app_commands.command(name="setupstatus", description="Zeigt Setup-Status an")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def setupstatus(self, interaction: Interaction):
+        embed = discord.Embed(title="Setup-Status")
+        for key, val in self.config.items():
+            embed.add_field(name=key, value=str(val), inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @app_commands.guilds(discord.Object(id=guild_id))
+    @app_commands.command(name="startuse", description="Schalte Bot auf produktiv")
+    @app_commands.checks.has_permissions(administrator=True)
+    async def startuse(self, interaction: Interaction):
+        self.config['setup_complete'] = True
+        self.save()
+        await interaction.response.send_message("Bot läuft jetzt produktiv.", ephemeral=True)
+
+async def setup(bot: commands.Bot):
+    cog = SetupCog(bot)
+    bot.add_cog(cog)
+    await bot.tree.sync(guild=discord.Object(id=guild_id))
