@@ -6,6 +6,7 @@ from discord.ext import commands
 from discord import app_commands, Interaction, Embed
 from utils import is_admin  # <-- nutzt Rechte-Check aus utils.py
 from utils import load_json, save_json
+from permissions import has_permission_for
 
 # === Konfiguration ===
 

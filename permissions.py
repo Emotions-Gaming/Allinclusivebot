@@ -1,95 +1,148 @@
 ﻿# permissions.py
 
 import os
-import json
+import logging
 from discord.ext import commands
-from discord import app_commands, Interaction, Role
+from discord import app_commands, Interaction, Role, Guild
+from utils import is_admin, load_json, save_json, mention_roles
 
 PERMISSIONS_FILE = "persistent_data/commands_permissions.json"
 
-def load_permissions():
-    """Lädt die Command-Permissions aus JSON (oder gibt {} zurück)."""
-    if not os.path.exists(PERMISSIONS_FILE):
-        return {}
-    try:
-        with open(PERMISSIONS_FILE, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+try:
+    GUILD_ID = int(os.environ.get("GUILD_ID"))
+except Exception:
+    GUILD_ID = None
 
-def save_permissions(data):
-    os.makedirs(os.path.dirname(PERMISSIONS_FILE), exist_ok=True)
-    with open(PERMISSIONS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+def get_guild(bot: commands.Bot) -> Guild:
+    if GUILD_ID is None:
+        return None
+    return bot.get_guild(GUILD_ID)
 
+# === Decorator für Command-Checks ===
 def has_permission_for(command_name):
-    """
-    Universal-Permission-Check für Slash-Commands.
-    Benutzen in jedem Command als:
-    @has_permission_for("strikegive")
-    async def strikegive(...): ...
-    """
-    async def predicate(interaction: Interaction):
-        if interaction.user.guild_permissions.administrator:
-            return True
-        perms = load_permissions()
-        allowed_roles = perms.get(command_name, [])
-        if not allowed_roles:
-            return False
-        user_role_ids = [role.id for role in getattr(interaction.user, "roles", [])]
-        return any(role_id in user_role_ids for role_id in allowed_roles)
-    return app_commands.check(predicate)
+    def predicate(func):
+        async def wrapper(self, interaction: Interaction, *args, **kwargs):
+            # Admins immer Zugriff
+            if is_admin(interaction.user):
+                return await func(self, interaction, *args, **kwargs)
+            config = load_json(PERMISSIONS_FILE, {})
+            allowed_roles = set(config.get(command_name, []))
+            if not allowed_roles:
+                # Wenn keine expliziten Rollen gesetzt, Standard: nur Admin
+                await interaction.response.send_message("❌ Du hast keine Berechtigung.", ephemeral=True)
+                return
+            user_roles = {r.id for r in getattr(interaction.user, "roles", [])}
+            if user_roles & allowed_roles:
+                return await func(self, interaction, *args, **kwargs)
+            await interaction.response.send_message("❌ Du hast keine Berechtigung.", ephemeral=True)
+        return wrapper
+    return predicate
 
 class PermissionsCog(commands.Cog):
-    """Cog mit Commands zum Setzen und Anzeigen der Berechtigungen."""
-
     def __init__(self, bot):
         self.bot = bot
-        # Datei initial anlegen, falls nicht vorhanden
         if not os.path.exists(PERMISSIONS_FILE):
-            save_permissions({})
+            save_json(PERMISSIONS_FILE, {})  # Initialisieren
+
+    def _load(self):
+        return load_json(PERMISSIONS_FILE, {})
+
+    def _save(self, data):
+        save_json(PERMISSIONS_FILE, data)
+
+    # --- Alle verfügbaren Command-Namen (für Autocomplete) ---
+    def available_commands(self):
+        # Liste alle Commands in allen geladenen Cogs mit @has_permission_for
+        cmds = []
+        for cog in self.bot.cogs.values():
+            for cmd in getattr(cog, 'get_app_commands', lambda: [])():
+                cmds.append(cmd)
+            # Fallback: alle Slash-Commands
+            for command in getattr(cog, 'app_commands', []):
+                if isinstance(command, app_commands.Command):
+                    cmds.append(command.name)
+        # Extra: alle im bot.tree registrierten
+        for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
+            cmds.append(cmd.name)
+        # Keine Duplicates
+        return sorted(set(cmds))
+
+    # --- AUTOCOMPLETE für Command-Namen ---
+    async def command_autocomplete(self, interaction: Interaction, current: str):
+        cmds = [cmd for cmd in self.available_commands() if current.lower() in cmd.lower()]
+        # Discord lässt nur 25 Vorschläge zu!
+        return [app_commands.Choice(name=cmd, value=cmd) for cmd in cmds[:25]]
+
+    @app_commands.command(
+        name="refreshpermissions",
+        description="Synchronisiert alle Slash-Command-Berechtigungen laut Config (nur Admins)"
+    )
+    @app_commands.guilds(GUILD_ID)
+    async def refreshpermissions(self, interaction: Interaction):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
+            return
+        guild = get_guild(self.bot)
+        if not guild:
+            await interaction.response.send_message("❌ Guild nicht gefunden (GUILD_ID prüfen)!", ephemeral=True)
+            return
+        config = self._load()
+        synced, failed = 0, 0
+        for command in self.bot.tree.get_commands(guild=guild):
+            name = command.name
+            allowed_roles = config.get(name, [])
+            try:
+                role_objs = [guild.get_role(rid) for rid in allowed_roles]
+                role_ids = [r.id for r in role_objs if r]
+                perms = app_commands.default_permissions()
+                await command.edit(guild=guild, default_member_permissions=perms, roles=role_ids)
+                synced += 1
+            except Exception as e:
+                logging.error(f"Fehler beim Sync von Command {name}: {e}")
+                failed += 1
+        await interaction.response.send_message(
+            f"🔄 Permissions refresh abgeschlossen: {synced} Command(s) aktualisiert, {failed} Fehler.", ephemeral=True
+        )
 
     @app_commands.command(
         name="befehlpermission",
         description="Gibt einer Rolle Zugriff auf einen Slash-Command (nur Admins)"
     )
+    @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die Zugriff erhalten soll")
-    @has_permission_for("befehlpermission")
+    @app_commands.autocomplete(command=lambda self, interaction, current: self.command_autocomplete(interaction, current))
     async def befehlpermission(self, interaction: Interaction, command: str, role: Role):
-        """Fügt einer Rolle Zugriff auf einen Command hinzu."""
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
             return
-
-        perms = load_permissions()
-        allowed = set(perms.get(command, []))
+        config = self._load()
+        allowed = set(config.get(command, []))
         allowed.add(role.id)
-        perms[command] = list(allowed)
-        save_permissions(perms)
+        config[command] = list(allowed)
+        self._save(config)
         await interaction.response.send_message(
-            f"✅ Rolle {role.mention} hat nun Zugriff auf /{command}.", ephemeral=True
+            f"✅ Rolle {role.mention} hat nun Zugriff auf /{command}. (Bitte /refreshpermissions ausführen!)", ephemeral=True
         )
 
     @app_commands.command(
         name="befehlpermissionremove",
         description="Entzieht einer Rolle den Zugriff auf einen Slash-Command (nur Admins)"
     )
+    @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die entfernt werden soll")
-    @has_permission_for("befehlpermissionremove")
+    @app_commands.autocomplete(command=lambda self, interaction, current: self.command_autocomplete(interaction, current))
     async def befehlpermissionremove(self, interaction: Interaction, command: str, role: Role):
-        """Entzieht einer Rolle den Zugriff auf einen Command."""
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
             return
-
-        perms = load_permissions()
-        allowed = set(perms.get(command, []))
+        config = self._load()
+        allowed = set(config.get(command, []))
         if role.id in allowed:
             allowed.remove(role.id)
-            perms[command] = list(allowed)
-            save_permissions(perms)
+            config[command] = list(allowed)
+            self._save(config)
             await interaction.response.send_message(
-                f"✅ Rolle {role.mention} wurde von /{command} entfernt.", ephemeral=True
+                f"✅ Rolle {role.mention} wurde von /{command} entfernt. (Bitte /refreshpermissions ausführen!)", ephemeral=True
             )
         else:
             await interaction.response.send_message(
@@ -100,35 +153,24 @@ class PermissionsCog(commands.Cog):
         name="befehlpermissions",
         description="Zeigt alle erlaubten Rollen für einen Command"
     )
+    @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)")
-    @has_permission_for("befehlpermissions")
+    @app_commands.autocomplete(command=lambda self, interaction, current: self.command_autocomplete(interaction, current))
     async def befehlpermissions(self, interaction: Interaction, command: str):
-        """Zeigt alle Rollen, die Zugriff auf einen Command haben."""
-        if not interaction.user.guild_permissions.administrator:
+        if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
             return
-
-        perms = load_permissions()
-        role_ids = perms.get(command, [])
-        if not role_ids:
+        guild = get_guild(self.bot)
+        config = self._load()
+        role_ids = config.get(command, [])
+        if role_ids:
+            mentions = mention_roles(guild, role_ids)
             await interaction.response.send_message(
-                f"🔒 Kein Zugriff gesetzt für /{command} (außer Admins)", ephemeral=True
-            )
-            return
-
-        guild = interaction.guild
-        mentions = []
-        for rid in role_ids:
-            role = guild.get_role(rid)
-            if role:
-                mentions.append(role.mention)
-        if mentions:
-            await interaction.response.send_message(
-                f"🔒 Zugriff auf /{command}: {' '.join(mentions)}", ephemeral=True
+                f"🔒 Zugriff auf /{command}: {mentions}", ephemeral=True
             )
         else:
             await interaction.response.send_message(
-                f"🔒 Zugriff auf /{command}: (Rollen nicht gefunden!)", ephemeral=True
+                f"🔒 Kein Zugriff gesetzt für /{command} (außer Admins)", ephemeral=True
             )
 
 # === Setup-Funktion für Extension-Loader ===
