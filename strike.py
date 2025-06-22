@@ -106,6 +106,7 @@ class StrikeCog(commands.Cog):
         description="Postet eine Anleitung zur Strikevergabe"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikemaininfo")
     async def strikemaininfo(self, interaction: Interaction):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -130,6 +131,7 @@ class StrikeCog(commands.Cog):
         description="Gibt einem User einen Strike (nur für berechtigte Rollen)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikegive")
     async def strikegive(self, interaction: Interaction, user: Member):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung für Strikevergabe.", ephemeral=True)
@@ -190,6 +192,7 @@ class StrikeCog(commands.Cog):
         description="Entfernt den letzten Strike eines Users"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikeremove")
     async def strikeremove(self, interaction: Interaction, user: Member):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -211,6 +214,7 @@ class StrikeCog(commands.Cog):
         description="Entfernt alle Strikes eines Users"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikedelete")
     async def strikedelete(self, interaction: Interaction, user: Member):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -233,6 +237,7 @@ class StrikeCog(commands.Cog):
         description="Zeigt dir deine eigenen Strikes (privat)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikeview")
     async def strikeview(self, interaction: Interaction):
         data = _load_data()
         uid = str(interaction.user.id)
@@ -252,6 +257,7 @@ class StrikeCog(commands.Cog):
         description="Setzt den Channel für die Strike-Übersicht"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikelist")
     async def strikelist(self, interaction: Interaction, channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen das setzen.", ephemeral=True)
@@ -265,6 +271,7 @@ class StrikeCog(commands.Cog):
         description="Fügt eine Rolle zu den Strike-Berechtigten hinzu"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikerole")
     async def strikerole(self, interaction: Interaction, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -279,6 +286,7 @@ class StrikeCog(commands.Cog):
         description="Entfernt eine Rolle aus den Strike-Berechtigten"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikerole_remove")
     async def strikerole_remove(self, interaction: Interaction, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -296,6 +304,7 @@ class StrikeCog(commands.Cog):
         description="Setzt die Rolle, die bei 3 Strikes automatisch vergeben wird"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikeaddrole")
     async def strikeaddrole(self, interaction: Interaction, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -308,6 +317,7 @@ class StrikeCog(commands.Cog):
         description="Entfernt die Auto-Rolle für 3 Strikes"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("strikeaddrole_remove")
     async def strikeaddrole_remove(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)

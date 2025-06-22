@@ -68,6 +68,7 @@ class WikiCog(commands.Cog):
         description="Setzt den Hauptkanal & postet das Wiki-Menü (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("wikimain")
     async def wikimain(self, interaction: Interaction, channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -81,6 +82,7 @@ class WikiCog(commands.Cog):
         description="Speichert diesen Channel als Wiki-Seite (nur Admin!)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("wiki_page")
     async def wiki_page(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -125,6 +127,7 @@ class WikiCog(commands.Cog):
         description="Löscht eine Wiki-Seite (Dropdown, nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("wiki_delete")
     async def wiki_delete(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -171,6 +174,7 @@ class WikiCog(commands.Cog):
         description="Bearbeite eine Wiki-Seite (Dropdown, Modal, nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("wiki_edit")
     async def wiki_edit(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -224,6 +228,7 @@ class WikiCog(commands.Cog):
         description="Stellt eine Seite aus Backup wieder her (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("wiki_backup")
     async def wiki_backup(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)

@@ -76,6 +76,7 @@ class AlarmCog(commands.Cog):
         description="Postet/zurücksetzt das Alarm-Hauptpanel"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmmain")
     async def alarmmain(self, interaction: Interaction):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -92,6 +93,7 @@ class AlarmCog(commands.Cog):
         description="Setzt den AlarmLead"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmlead")
     async def alarmlead(self, interaction: Interaction, user: Member):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins.", ephemeral=True)
@@ -107,6 +109,7 @@ class AlarmCog(commands.Cog):
         description="Entfernt den AlarmLead"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmlead_remove")
     async def alarmlead_remove(self, interaction: Interaction, user: Member):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins.", ephemeral=True)
@@ -125,6 +128,7 @@ class AlarmCog(commands.Cog):
         description="Zeigt aktuellen AlarmLead"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmlead_info")
     async def alarmlead_info(self, interaction: Interaction):
         cfg = _load_alarm()
         guild = self.bot.get_guild(GUILD_ID)
@@ -140,6 +144,7 @@ class AlarmCog(commands.Cog):
         description="Fügt eine Rolle zum User-Ping hinzu"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmusers_add")
     async def alarmusers_add(self, interaction: Interaction, role: Role):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -157,6 +162,7 @@ class AlarmCog(commands.Cog):
         description="Entfernt eine Rolle aus dem User-Ping"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmusers_remove")
     async def alarmusers_remove(self, interaction: Interaction, role: Role):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -176,6 +182,7 @@ class AlarmCog(commands.Cog):
         description="Setzt Log-Channel für Alarmübernahmen"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmlog")
     async def alarmlog(self, interaction: Interaction, channel: TextChannel):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
@@ -191,6 +198,7 @@ class AlarmCog(commands.Cog):
         description="Weist einem Nutzer direkt eine Schicht zu"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("alarmzuteilung")
     async def alarmzuteilung(self, interaction: Interaction, user: Member):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)

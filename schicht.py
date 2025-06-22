@@ -80,6 +80,7 @@ class SchichtCog(commands.Cog):
         description="Postet das zentrale Info-Panel für die Schichtübergabe"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtmain")
     async def schichtmain(self, interaction: Interaction):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung für diesen Befehl.", ephemeral=True)
@@ -92,6 +93,7 @@ class SchichtCog(commands.Cog):
         description="Führt eine Schichtübergabe im Voice-Channel an einen anderen Nutzer durch"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtuebergabe")
     async def schichtuebergabe(self, interaction: Interaction, ziel: Member):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für eine Schichtübergabe.", ephemeral=True)
@@ -152,6 +154,7 @@ class SchichtCog(commands.Cog):
         description="Fügt eine Rolle zu den Schichtrollen hinzu (darf Übergaben machen)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtsetrolle")
     async def schichtsetrolle(self, interaction: Interaction, rolle: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen Rollen setzen.", ephemeral=True)
@@ -168,6 +171,7 @@ class SchichtCog(commands.Cog):
         description="Entfernt eine Rolle aus den Schichtrollen"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtremoverolle")
     async def schichtremoverolle(self, interaction: Interaction, rolle: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen Rollen entfernen.", ephemeral=True)
@@ -187,6 +191,7 @@ class SchichtCog(commands.Cog):
         description="Setzt den Ziel-Voice-Channel für Schichtübergaben"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtsetvoice")
     async def schichtsetvoice(self, interaction: Interaction, voice_channel: VoiceChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen den Ziel-Voice-Channel setzen.", ephemeral=True)
@@ -201,6 +206,7 @@ class SchichtCog(commands.Cog):
         description="Setzt den Log-Channel für Schichtübergaben"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtsetlog")
     async def schichtsetlog(self, interaction: Interaction, log_channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen den Log-Channel setzen.", ephemeral=True)
@@ -215,6 +221,7 @@ class SchichtCog(commands.Cog):
         description="Zeigt die aktuelle Schicht-Konfiguration"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("schichtinfo")
     async def schichtinfo(self, interaction: Interaction):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)

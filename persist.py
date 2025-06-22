@@ -82,6 +82,7 @@ class PersistCog(commands.Cog):
         name="backupnow",
         description="Erstellt sofort ein Backup aller kritischen Daten (nur Admins)"
     )
+    @has_permission_for("backupnow")
     async def backupnow(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
@@ -97,6 +98,7 @@ class PersistCog(commands.Cog):
         name="restorenow",
         description="Überschreibt ALLE Live-Daten mit dem letzten Backup! (nur Admins)"
     )
+    @has_permission_for("restorenow")
     async def restorenow(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)

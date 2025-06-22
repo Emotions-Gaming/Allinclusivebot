@@ -91,6 +91,7 @@ class TranslationCog(commands.Cog):
         description="Postet das Übersetzungsmenü ins Channel (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatorpost")
     async def translatorpost(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -106,6 +107,7 @@ class TranslationCog(commands.Cog):
         description="Neues Übersetzer-Profil hinzufügen (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatoraddprofile")
     async def translatoraddprofile(self, interaction: Interaction, name: str, stil: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -124,6 +126,7 @@ class TranslationCog(commands.Cog):
         description="Entfernt ein Übersetzer-Profil (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatordeleteprofile")
     async def translatordeleteprofile(self, interaction: Interaction, name: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -142,6 +145,7 @@ class TranslationCog(commands.Cog):
         description="Setzt die Kategorie für Übersetzungs-Sessions (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatorsetcategorie")
     async def translatorsetcategorie(self, interaction: Interaction, category: CategoryChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -154,6 +158,7 @@ class TranslationCog(commands.Cog):
         description="Setzt den Log-Channel für Übersetzungen (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatorlog")
     async def translatorlog(self, interaction: Interaction, channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -168,6 +173,7 @@ class TranslationCog(commands.Cog):
         description="Setzt eine Zusatzregel für den Übersetzungs-Prompt (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatorprompt")
     async def translatorprompt(self, interaction: Interaction, regel: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
@@ -180,6 +186,7 @@ class TranslationCog(commands.Cog):
         description="Löscht den Prompt-Zusatz (nur Admin)"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("translatorpromptdelete")
     async def translatorpromptdelete(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)

@@ -35,6 +35,7 @@ class SetupBotCog(commands.Cog):
         name="startsetup",
         description="Geführtes Setup: Konfiguriere alle Menü-Channels (nur Admins)"
     )
+    @has_permission_for("startsetup")
     async def startsetup(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
@@ -85,6 +86,7 @@ class SetupBotCog(commands.Cog):
         name="refreshposts",
         description="Postet alle Menüpanels/Embeds neu in die hinterlegten Channels (nur Admins)"
     )
+    @has_permission_for("refreshposts")
     async def refreshposts(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
@@ -102,6 +104,7 @@ class SetupBotCog(commands.Cog):
         name="setupstatus",
         description="Zeigt die aktuelle Setup-Konfiguration"
     )
+    @has_permission_for("setupstatus")
     async def setupstatus(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
@@ -121,6 +124,7 @@ class SetupBotCog(commands.Cog):
         name="startuse",
         description="Setzt das Setup auf abgeschlossen (nur Admins)"
     )
+    @has_permission_for("startuse")
     async def startuse(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
@@ -166,6 +170,7 @@ class SetupCog(commands.Cog):
         description="Zeigt eine Übersicht aller wichtigen Commands & Erklärungen"
     )
     @app_commands.guilds(GUILD_ID)
+    @has_permission_for("spacehelp")
     async def spacehelp(self, interaction: Interaction):
         embed = Embed(
             title="🛰️ Space Guide – Hilfe & Befehlsübersicht",
