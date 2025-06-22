@@ -10,56 +10,36 @@ DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 
 intents = discord.Intents.default()
-intents.members = True
-intents.guilds = True
-intents.message_content = True
-
 bot = commands.Bot(command_prefix="!", intents=intents)
+
+class CommandCleaner(commands.Cog):
+    def __init__(self, bot):
+        self.bot = bot
+
+    @discord.app_commands.command(name="deletecommands", description="Löscht alle Slash-Commands des Bots auf diesem Server")
+    async def deletecommands(self, interaction: discord.Interaction):
+        guild = discord.Object(id=GUILD_ID)
+        await bot.tree.clear_commands(guild=guild)
+        await bot.tree.sync(guild=guild)
+        await interaction.response.send_message("Alle Slash-Commands für diesen Server gelöscht!", ephemeral=True)
+        print("Alle Slash-Commands wurden gelöscht.")
+
+async def setup(bot):
+    await bot.add_cog(CommandCleaner(bot))
 
 @bot.event
 async def on_ready():
-    try:
-        guild = discord.Object(id=GUILD_ID)
-        print("🔄 Entferne alte Slash-Commands (guild-only)...")
-        await bot.tree.sync(guild=guild)  # Hard-Resync (wenn clear nicht geht: bot.tree.clear_commands geht nur mit v2.3+)
-        print(f"🟢 Slash-Commands neu registriert für Guild-ID {GUILD_ID}")
-    except Exception as e:
-        print(f"❌ Fehler beim Synchronisieren der Commands: {e}")
-
-    # Nach dem Sync: Liste alle Commands
-    try:
-        cmds = await bot.tree.fetch_commands(guild=discord.Object(id=GUILD_ID))
-        if not cmds:
-            print("⚠️ Keine Commands wurden gefunden!")
-        for cmd in cmds:
-            print(f"  - /{cmd.name} | {cmd.description}")
-    except Exception as e:
-        print(f"❌ Fehler beim Abfragen der registrierten Commands: {e}")
-
     print(f"✅ Bot online: {bot.user} ({bot.user.id})")
-    print("Alle Extensions geladen und ready!\n")
+    guild = discord.Object(id=GUILD_ID)
+    try:
+        await bot.tree.sync(guild=guild)
+        print(f"Commands (re)synced für Guild-ID {GUILD_ID}")
+    except Exception as e:
+        print(f"Fehler beim Sync: {e}")
 
 async def main():
-    extensions = [
-        "persist",
-        "permissions",
-        "setupbot",
-        "translation",
-        "strike",
-        "wiki",
-        "schicht",
-        "alarm"
-    ]
-    for ext in extensions:
-        try:
-            await bot.load_extension(ext)
-            print(f"🧩 Extension geladen: {ext}")
-        except Exception as e:
-            print(f"❌ Fehler beim Laden von {ext}: {e}")
-    try:
-        await bot.start(DISCORD_TOKEN)
-    except Exception as e:
-        print(f"❌ Bot konnte nicht gestartet werden: {e}")
+    await bot.load_extension(__name__)
+    await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
