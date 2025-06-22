@@ -11,30 +11,36 @@ GUILD_ID = int(os.getenv("GUILD_ID"))
 intents = discord.Intents.default()
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-@bot.event
-async def on_ready():
-    guild = discord.Object(id=GUILD_ID)
-    try:
-        print("🔄 Entferne alle Slash-Commands auf Guild:", GUILD_ID)
-        await bot.tree.sync(guild=guild)
-        old = await bot.tree.fetch_commands(guild=guild)
-        print(f"  Vorher: {len(old)} Slash-Commands vorhanden.")
-        # Fix: clear_commands ist kein awaitable!
-        bot.tree.clear_commands(guild=guild)
-        await bot.tree.sync(guild=guild)
-        after = await bot.tree.fetch_commands(guild=guild)
-        print(f"  Nachher: {len(after)} Slash-Commands vorhanden.")
-        if not after:
-            print("✅ Alle Slash-Commands erfolgreich gelöscht.")
-        else:
-            print("⚠️ Einige Commands konnten nicht gelöscht werden:", [c.name for c in after])
-    except Exception as e:
-        print("❌ Fehler beim Command-Wipe:", e)
+async def wipe_commands():
+    # 1. Globale Commands löschen
+    print("🔄 Entferne ALLE (globale + guild) Slash-Commands...")
+    print("  → Lösche globale Commands...")
+    global_before = await bot.tree.fetch_commands()
+    print(f"  Vorher global: {len(global_before)}")
+    bot.tree.clear_commands()
+    await bot.tree.sync()
+    global_after = await bot.tree.fetch_commands()
+    print(f"  Nachher global: {len(global_after)}")
 
-    print(f"✅ Bot online: {bot.user} ({bot.user.id})")
+    # 2. Guild-Commands löschen
+    guild = discord.Object(id=GUILD_ID)
+    print("  → Lösche Guild-Commands...")
+    guild_before = await bot.tree.fetch_commands(guild=guild)
+    print(f"  Vorher guild: {len(guild_before)}")
+    bot.tree.clear_commands(guild=guild)
+    await bot.tree.sync(guild=guild)
+    guild_after = await bot.tree.fetch_commands(guild=guild)
+    print(f"  Nachher guild: {len(guild_after)}")
+
+    print("✅ Wipe abgeschlossen (Discord-Caching kann 1-60 Minuten dauern!)")
     print("Beende Prozess in 5 Sekunden…")
     await asyncio.sleep(5)
     exit(0)
+
+@bot.event
+async def on_ready():
+    await wipe_commands()
+    print(f"✅ Bot online: {bot.user} ({bot.user.id})")
 
 if __name__ == "__main__":
     asyncio.run(bot.start(DISCORD_TOKEN))
