@@ -38,16 +38,20 @@ def has_permission_for(command_name):
         return wrapper
     return predicate
 
+# --- AUTOCOMPLETE für Command-Namen ---
+# Diese Funktion MUSS außerhalb der Cog-Klasse stehen!
+async def command_autocomplete(interaction: Interaction, current: str):
+    cog = interaction.client.get_cog('PermissionsCog')
+    if cog is not None:
+        cmds = [cmd for cmd in cog.available_commands() if current.lower() in cmd.lower()]
+        return [app_commands.Choice(name=cmd, value=cmd) for cmd in cmds[:25]]
+    return []
+
 class PermissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         if not os.path.exists(PERMISSIONS_FILE):
             save_json(PERMISSIONS_FILE, {})  # Initialisieren
-
-        # ==== Hier wird das Autocomplete nachträglich gesetzt ====
-        self.befehlpermission.autocomplete["command"] = self.command_autocomplete
-        self.befehlpermissionremove.autocomplete["command"] = self.command_autocomplete
-        self.befehlpermissions.autocomplete["command"] = self.command_autocomplete
 
     def _load(self):
         return load_json(PERMISSIONS_FILE, {})
@@ -58,24 +62,21 @@ class PermissionsCog(commands.Cog):
     # --- Alle verfügbaren Command-Namen (für Autocomplete) ---
     def available_commands(self):
         cmds = []
+        # Sammle alle Commands aus allen geladenen Cogs (mit Slash-Commands)
         for cog in self.bot.cogs.values():
-            for cmd in getattr(cog, 'get_app_commands', lambda: [])():
-                cmds.append(cmd)
-            # Fallback: alle Slash-Commands
-            for command in getattr(cog, 'app_commands', []):
-                if isinstance(command, app_commands.Command):
-                    cmds.append(command.name)
-        # Extra: alle im bot.tree registrierten
+            # Extra-Methode, falls du für eigene Cogs eigene Methoden gemacht hast
+            if hasattr(cog, 'get_app_commands'):
+                for cmd in cog.get_app_commands():
+                    cmds.append(cmd)
+            # Fallback: alle Slash-Commands in 'app_commands'
+            if hasattr(cog, 'app_commands'):
+                for command in cog.app_commands:
+                    if isinstance(command, app_commands.Command):
+                        cmds.append(command.name)
+        # Noch alle aus bot.tree holen (Guild-only!)
         for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
             cmds.append(cmd.name)
-        # Keine Duplicates
         return sorted(set(cmds))
-
-    # --- AUTOCOMPLETE für Command-Namen ---
-    async def command_autocomplete(self, interaction: Interaction, current: str):
-        cmds = [cmd for cmd in self.available_commands() if current.lower() in cmd.lower()]
-        # Discord lässt nur 25 Vorschläge zu!
-        return [app_commands.Choice(name=cmd, value=cmd) for cmd in cmds[:25]]
 
     @app_commands.command(
         name="refreshpermissions",
@@ -114,7 +115,7 @@ class PermissionsCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die Zugriff erhalten soll")
-    # @app_commands.autocomplete(command="command_autocomplete")   # <--- RAUSGENOMMEN
+    @app_commands.autocomplete(command=command_autocomplete)
     async def befehlpermission(self, interaction: Interaction, command: str, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
@@ -134,7 +135,7 @@ class PermissionsCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die entfernt werden soll")
-    # @app_commands.autocomplete(command="command_autocomplete")   # <--- RAUSGENOMMEN
+    @app_commands.autocomplete(command=command_autocomplete)
     async def befehlpermissionremove(self, interaction: Interaction, command: str, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
@@ -159,7 +160,7 @@ class PermissionsCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)")
-    # @app_commands.autocomplete(command="command_autocomplete")   # <--- RAUSGENOMMEN
+    @app_commands.autocomplete(command=command_autocomplete)
     async def befehlpermissions(self, interaction: Interaction, command: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
