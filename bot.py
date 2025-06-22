@@ -19,8 +19,8 @@ async def on_ready():
         await bot.tree.sync(guild=guild)
         old = await bot.tree.fetch_commands(guild=guild)
         print(f"  Vorher: {len(old)} Slash-Commands vorhanden.")
-        # Lösche alle Commands
-        await bot.tree.clear_commands(guild=guild)
+        # Fix: clear_commands ist kein awaitable!
+        bot.tree.clear_commands(guild=guild)
         await bot.tree.sync(guild=guild)
         after = await bot.tree.fetch_commands(guild=guild)
         print(f"  Nachher: {len(after)} Slash-Commands vorhanden.")
