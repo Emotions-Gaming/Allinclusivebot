@@ -6,6 +6,8 @@ import asyncio
 from discord.ext import commands
 from discord import app_commands, Interaction, TextChannel, CategoryChannel, Member, Role, Embed
 from utils import is_admin, load_json, save_json
+from permissions import has_permission_for
+
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 ALARM_JSON = "persistent_data/alarm_config.json"

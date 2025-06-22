@@ -5,6 +5,8 @@ import os
 from discord.ext import commands
 from discord import app_commands, Interaction, TextChannel
 from utils import is_admin, load_json, save_json
+from permissions import has_permission_for
+
 
 SETUP_FILE = "persistent_data/setup_config.json"
 

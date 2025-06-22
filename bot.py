@@ -9,6 +9,8 @@ from discord import app_commands
 import traceback
 from datetime import datetime
 from dotenv import load_dotenv
+from permissions import has_permission_for
+
 
 # === Logging Setup ===
 logging.basicConfig(

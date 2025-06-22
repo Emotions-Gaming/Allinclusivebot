@@ -6,6 +6,8 @@ import datetime
 from discord.ext import commands
 from discord import app_commands, Interaction, Member, Role, TextChannel, Embed
 from utils import is_admin, has_any_role, load_json, save_json
+from permissions import has_permission_for
+
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 
