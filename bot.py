@@ -4,47 +4,46 @@ from discord.ext import commands
 from dotenv import load_dotenv
 import asyncio
 
-# ENV-Variablen laden (Railway: Variablen im Dashboard)
+# ENV-Variablen laden
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-GUILD_ID = int(os.getenv("GUILD_ID"))  # GUILD_ID MUSS gesetzt sein!
+GUILD_ID = int(os.getenv("GUILD_ID"))
 
-# --- Discord Intents ---
+# Intents setzen (passe ggf. an deine Anforderungen an)
 intents = discord.Intents.default()
 intents.members = True
 intents.guilds = True
-intents.message_content = True  # Nur setzen, wenn Bot auch auf Messages reagieren muss
+intents.message_content = True
 
-# --- Bot-Objekt ---
+# Bot-Objekt
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# --- Ready Event ---
 @bot.event
 async def on_ready():
     try:
         guild = discord.Object(id=GUILD_ID)
-        # 1. Alle bisherigen Guild-Commands löschen
-        await bot.tree.sync(guild=guild)  # Initiales Sync, falls leer
-        await bot.tree.clear_commands(guild=guild)  # Wirklich alle raus!
-        await bot.tree.sync(guild=guild)  # Jetzt neu aufbauen!
+
+        # Erst Guild-Commands löschen, dann neu syncen
+        bot.tree.clear_commands(guild=guild)  # KEIN await!
+        await bot.tree.sync(guild=guild)
         print(f"🟢 Slash-Commands gelöscht & neu registriert für Guild-ID {GUILD_ID}")
+
     except Exception as e:
         print(f"❌ Fehler beim Synchronisieren der Commands: {e}")
     print(f"✅ Bot online: {bot.user} ({bot.user.id})")
     print("Alle Extensions geladen und ready!")
 
-# --- Main Funktion zum Laden der Extensions ---
 async def main():
     extensions = [
-        "persist",
-        "permissions",
-        "setupbot",      # <- Optional: nur aktiv, wenn du das Setup-System nutzt!
-        "translation",
-        "strike",
-        "wiki",
-        "schicht",
-        "alarm"
+        "persist",      # Backup-System
+        "permissions",  # Command-Permissions-System
+        "setupbot",     # Guided Admin Setup
+        "translation",  # Übersetzungssystem
+        "strike",       # Strikesystem
+        "wiki",         # Wiki-System
+        "schicht",      # Schichtsystem
+        "alarm"         # Alarm-System
     ]
     for ext in extensions:
         try:
@@ -57,6 +56,5 @@ async def main():
     except Exception as e:
         print(f"❌ Bot konnte nicht gestartet werden: {e}")
 
-# --- Bot-Start ---
 if __name__ == "__main__":
     asyncio.run(main())
