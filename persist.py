@@ -5,7 +5,7 @@ from discord.ext import commands
 from discord import app_commands
 from utils import is_admin
 
-# Alle wichtigen persistente Dateien (immer erweitern falls neue dazu kommen)
+# Liste aller wichtigen persistenten Dateien (immer erweitern, falls neue Systeme dazukommen)
 DATA_FILES = [
     "profiles.json", "translation_log.json", "translator_menu.json",
     "strike_data.json", "strike_roles.json", "strike_autorole.json",

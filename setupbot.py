@@ -1,23 +1,20 @@
-﻿import os
-import discord
+﻿import discord
 from discord.ext import commands
 from discord import app_commands
+import os
 from utils import load_json, save_json, is_admin
 
 SETUP_FILE = "setup_config.json"
 
-# Helper: Hole aktuelle Config, falls nicht geladen
 def get_config():
     return load_json(SETUP_FILE, {})
 
-# Helper: Speichern
 def set_config(data):
     save_json(SETUP_FILE, data)
 
 class SetupCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.config = get_config()
 
     @app_commands.command(name="startsetup", description="Geführtes Setup für alle Bot-Systeme (Admin only)")
     async def startsetup(self, interaction: discord.Interaction):
@@ -33,7 +30,6 @@ class SetupCog(commands.Cog):
         ]
         config = get_config()
 
-        # Channels
         for key, msg in steps:
             await interaction.followup.send(msg, ephemeral=True)
             try:
@@ -59,7 +55,6 @@ class SetupCog(commands.Cog):
 
     async def _refresh_all_menus(self, config, guild):
         # Hier wird angenommen, dass jede Extension eine reload_menu Funktion im globalen Namespace hat.
-        # Falls nicht, müssen wir sie via bot.get_cog(...) ansteuern.
         for system, key in [
             ("translation", "translation_main_channel"),
             ("wiki", "wiki_main_channel"),

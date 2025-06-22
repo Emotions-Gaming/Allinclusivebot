@@ -1,7 +1,7 @@
-﻿import discord
+﻿import os
+import discord
 from discord.ext import commands
 from discord import app_commands
-import os
 from utils import load_json, save_json, is_admin
 
 COMMAND_PERMS_FILE = "commands_permissions.json"
@@ -16,15 +16,10 @@ def save_perms(perms):
     path = os.path.join(PERM_DATA_PATH, COMMAND_PERMS_FILE)
     save_json(path, perms)
 
-def get_command_name(command):
-    # Gibt den Namen eines Slash-Commands zurück (z.B. 'alarmmain')
-    return command.name if hasattr(command, 'name') else str(command)
-
 class PermissionCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # --- (A) Setup/Refresh für ALLE Commands ---
     @app_commands.command(name="refreshpermissions", description="Alle Slash-Command-Rechte neu vergeben/aktualisieren (Admin)")
     async def refreshpermissions(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
@@ -32,25 +27,26 @@ class PermissionCog(commands.Cog):
         perms = get_perms()
         guild = interaction.guild
 
-        # Alle Befehle auf dem Server durchgehen
+        # Gehe alle registrierten Commands durch
         cmds = [cmd for cmd in self.bot.tree.get_commands(guild=guild) or self.bot.tree.get_commands()]
         for command in cmds:
-            c_name = get_command_name(command)
+            c_name = command.name
             allowed_role_ids = perms.get(c_name, [])
-            # Setze Discord-Permissions (CommandSync)
+            # Setze Permissions (Discord 2.3+ macht das per CommandSync und Permissions-API)
             try:
-                await command.edit(guild=guild, default_member_permissions=None, dm_permission=False)
-                # Wenn Rechte gesetzt, dann alle außer erlaubte Rollen ausblenden
+                # Per Default: nur für Admins verfügbar
+                await command.edit(guild=guild, default_permission=False)
+                # Wenn Rollen gesetzt, gib nur diesen Zugriff
                 if allowed_role_ids:
-                    await command.edit(guild=guild, default_member_permissions=None,
-                                      default_permission=False,
-                                      permissions=[discord.app_commands.CommandPermission(role, True, command) for role in allowed_role_ids])
+                    perms_obj = [
+                        discord.app_commands.CommandPermission(role_id, True, command) for role_id in allowed_role_ids
+                    ]
+                    await command.edit(guild=guild, permissions=perms_obj)
             except Exception as e:
                 print(f"Fehler beim Setzen der Permissions für {c_name}: {e}")
 
         await interaction.response.send_message("Permissions für alle Commands wurden aktualisiert.", ephemeral=True)
 
-    # --- (B) Rechte zu einem Befehl manuell hinzufügen/entfernen ---
     @app_commands.command(name="befehlpermission", description="Rolle zu einem Befehl hinzufügen (Admin)")
     @app_commands.describe(command="Name des Befehls", role="Rolle die erlaubt werden soll")
     async def befehlpermission(self, interaction: discord.Interaction, command: str, role: discord.Role):
@@ -79,7 +75,6 @@ class PermissionCog(commands.Cog):
             f"Rolle {role.mention} kann `{command}` nicht mehr verwenden. Bitte `/refreshpermissions` ausführen!", ephemeral=True
         )
 
-    # --- (C) Zeige aktuelle Rechte eines Commands ---
     @app_commands.command(name="befehlpermissions", description="Zeigt die erlaubten Rollen für einen Befehl (Admin)")
     @app_commands.describe(command="Name des Befehls")
     async def befehlpermissions(self, interaction: discord.Interaction, command: str):

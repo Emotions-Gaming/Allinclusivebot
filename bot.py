@@ -7,7 +7,6 @@ import asyncio
 # ENV-Variablen laden
 load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GUILD_ID = int(os.getenv("GUILD_ID"))
 
 intents = discord.Intents.default()
@@ -22,20 +21,18 @@ async def on_ready():
     try:
         guild = discord.Object(id=GUILD_ID)
         print("🔄 Entferne alte Slash-Commands (guild-only)...")
-        bot.tree.clear_commands(guild=guild)
-        await bot.tree.sync(guild=guild)
-        print(f"🟢 Slash-Commands gelöscht & neu registriert für Guild-ID {GUILD_ID}")
+        await bot.tree.sync(guild=guild)  # Hard-Resync (wenn clear nicht geht: bot.tree.clear_commands geht nur mit v2.3+)
+        print(f"🟢 Slash-Commands neu registriert für Guild-ID {GUILD_ID}")
     except Exception as e:
         print(f"❌ Fehler beim Synchronisieren der Commands: {e}")
 
     # Nach dem Sync: Liste alle Commands
-    print("📋 Registrierte Slash-Commands auf diesem Server:")
     try:
         cmds = await bot.tree.fetch_commands(guild=discord.Object(id=GUILD_ID))
         if not cmds:
             print("⚠️ Keine Commands wurden gefunden!")
         for cmd in cmds:
-            print(f"  - /{cmd.name} | Beschreibung: {cmd.description} | Typ: {cmd.type}")
+            print(f"  - /{cmd.name} | {cmd.description}")
     except Exception as e:
         print(f"❌ Fehler beim Abfragen der registrierten Commands: {e}")
 
