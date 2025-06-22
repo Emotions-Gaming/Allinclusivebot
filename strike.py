@@ -1,6 +1,7 @@
 ﻿import os
 import logging
 import datetime
+import discord
 from discord.ext import commands
 from discord import app_commands, Interaction, Member, Role, TextChannel, Embed
 from utils import is_admin, has_any_role, load_json, save_json
@@ -104,7 +105,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikemaininfo")
-    async def strikemaininfo(self, interaction: Interaction):
+    async def strikemaininfo(self, interaction: discord.Interaction):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -129,7 +130,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikegive")
-    async def strikegive(self, interaction: Interaction, user):
+    async def strikegive(self, interaction: discord.Interaction, user):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung für Strikevergabe.", ephemeral=True)
             return
@@ -139,7 +140,7 @@ class StrikeCog(commands.Cog):
             reason = commands.ui.TextInput(label="Grund", style=2, min_length=5, max_length=300)
             image = commands.ui.TextInput(label="Bild-Link (optional)", required=False, max_length=200)
 
-            async def on_submit(self, modal_interaction: Interaction):
+            async def on_submit(self, modal_interaction: discord.Interaction):
                 # Speichern des Strikes
                 data = _load_data()
                 uid = str(user.id)
@@ -190,7 +191,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeremove")
-    async def strikeremove(self, interaction: Interaction, user):
+    async def strikeremove(self, interaction: discord.Interaction, user):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -212,7 +213,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikedelete")
-    async def strikedelete(self, interaction: Interaction, user):
+    async def strikedelete(self, interaction: discord.Interaction, user):
         if not is_strike_berechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -235,7 +236,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeview")
-    async def strikeview(self, interaction: Interaction):
+    async def strikeview(self, interaction: discord.Interaction):
         data = _load_data()
         uid = str(interaction.user.id)
         strikes = data.get(uid, [])
@@ -255,7 +256,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikelist")
-    async def strikelist(self, interaction: Interaction, channel):
+    async def strikelist(self, interaction: discord.Interaction, channel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen das setzen.", ephemeral=True)
             return
@@ -269,7 +270,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikerole")
-    async def strikerole(self, interaction: Interaction, role):
+    async def strikerole(self, interaction: discord.Interaction, role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -284,7 +285,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikerole_remove")
-    async def strikerole_remove(self, interaction: Interaction, role):
+    async def strikerole_remove(self, interaction: discord.Interaction, role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -302,7 +303,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeaddrole")
-    async def strikeaddrole(self, interaction: Interaction, role):
+    async def strikeaddrole(self, interaction: discord.Interaction, role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -315,7 +316,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeaddrole_remove")
-    async def strikeaddrole_remove(self, interaction: Interaction):
+    async def strikeaddrole_remove(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return

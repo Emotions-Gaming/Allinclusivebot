@@ -1,5 +1,6 @@
 ﻿import logging
 import os
+import discord
 from discord.ext import commands
 from discord import app_commands, Interaction, Embed, Color
 from utils import is_admin, load_json, save_json
@@ -51,7 +52,7 @@ class SetupBotCog(commands.Cog):
         description="Geführtes Setup: Konfiguriere alle Menü-Channels (nur Admins)"
     )
     @has_permission_for("startsetup")
-    async def startsetup(self, interaction: Interaction):
+    async def startsetup(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
             return
@@ -99,7 +100,7 @@ class SetupBotCog(commands.Cog):
         description="Postet alle Menüpanels/Embeds neu in die hinterlegten Channels (nur Admins)"
     )
     @has_permission_for("refreshposts")
-    async def refreshposts(self, interaction: Interaction):
+    async def refreshposts(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
             return
@@ -117,7 +118,7 @@ class SetupBotCog(commands.Cog):
         description="Zeigt die aktuelle Setup-Konfiguration"
     )
     @has_permission_for("setupstatus")
-    async def setupstatus(self, interaction: Interaction):
+    async def setupstatus(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
             return
@@ -137,7 +138,7 @@ class SetupBotCog(commands.Cog):
         description="Setzt das Setup auf abgeschlossen (nur Admins)"
     )
     @has_permission_for("startuse")
-    async def startuse(self, interaction: Interaction):
+    async def startuse(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Adminrechte!", ephemeral=True)
             return
@@ -152,7 +153,7 @@ class SetupBotCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("spacehelp")
-    async def spacehelp(self, interaction: Interaction):
+    async def spacehelp(self, interaction: discord.Interaction):
         embed = Embed(
             title="🛰️ Space Guide – Hilfe & Befehlsübersicht",
             description="Hier findest du alle wichtigen Slash-Commands mit Erklärung. (Berechtigungen beachten!)",

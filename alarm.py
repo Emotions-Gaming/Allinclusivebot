@@ -3,6 +3,7 @@
 import os
 import discord
 import asyncio
+import discord
 from discord.ext import commands
 from discord import app_commands, Interaction, TextChannel, CategoryChannel, Member, Role, Embed
 from utils import is_admin, load_json, save_json
@@ -208,7 +209,7 @@ class AlarmCog(commands.Cog):
             streamer = discord.ui.TextInput(label="Name Streamer/Schicht", required=True, max_length=80)
             zeit = discord.ui.TextInput(label="Schicht (Datum/Uhrzeit)", required=True, max_length=80)
 
-            async def on_submit(self, modal_interaction: Interaction):
+            async def on_submit(self, modal_interaction: discord.Interaction):
                 try:
                     await user.send(
                         f"🚨 **Alarm-Schicht zugeteilt:**\n"
@@ -239,7 +240,7 @@ class AlarmPanelView(discord.ui.View):
         self.cog = cog
 
     @discord.ui.button(label="Schichtanfrage erstellen", style=discord.ButtonStyle.green, custom_id="alarm_request")
-    async def create_alarm_request(self, interaction: Interaction, button: discord.ui.Button):
+    async def create_alarm_request(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Nur Lead/Admin darf
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Nur AlarmLead/Admin.", ephemeral=True)
@@ -249,7 +250,7 @@ class AlarmPanelView(discord.ui.View):
             streamer = discord.ui.TextInput(label="Name Streamer/Schicht", required=True, max_length=80)
             zeit = discord.ui.TextInput(label="Schicht (Datum/Uhrzeit)", required=True, max_length=80)
 
-            async def on_submit(self, modal_interaction: Interaction):
+            async def on_submit(self, modal_interaction: discord.Interaction):
                 cfg = _load_alarm()
                 guild = interaction.guild or self.cog.bot.get_guild(GUILD_ID)
                 channel = guild.get_channel(cfg["main_channel_id"])
@@ -280,7 +281,7 @@ class ClaimView(discord.ui.View):
         self.lead = lead
 
     @discord.ui.button(label="Schicht übernehmen", style=discord.ButtonStyle.blurple)
-    async def claim_alarm(self, interaction: Interaction, button: discord.ui.Button):
+    async def claim_alarm(self, interaction: discord.Interaction, button: discord.ui.Button):
         cfg = _load_alarm()
         # Log
         guild = interaction.guild or self.cog.bot.get_guild(GUILD_ID)

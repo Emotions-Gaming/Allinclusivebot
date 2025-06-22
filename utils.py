@@ -1,6 +1,8 @@
 ﻿import json
 import os
 import logging
+import discord
+from discord import app_commands
 from discord import Member, Guild, Role
 from typing import List, Any, Optional
 

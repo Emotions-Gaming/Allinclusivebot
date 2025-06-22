@@ -1,6 +1,7 @@
 ﻿import os
 import shutil
 import logging
+import discord
 from discord.ext import commands
 from discord import app_commands, Embed
 from utils import is_admin  # <-- nutzt Rechte-Check aus utils.py

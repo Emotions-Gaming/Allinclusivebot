@@ -3,6 +3,7 @@
 import os
 import logging
 import asyncio
+import discord
 from discord.ext import commands
 from discord import app_commands, Interaction, Embed
 from utils import is_admin, has_any_role, load_json, save_json
@@ -76,7 +77,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtmain")
-    async def schichtmain(self, interaction: Interaction):
+    async def schichtmain(self, interaction: discord.Interaction):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung für diesen Befehl.", ephemeral=True)
             return
@@ -89,7 +90,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtuebergabe")
-    async def schichtuebergabe(self, interaction: Interaction, ziel):
+    async def schichtuebergabe(self, interaction: discord.Interaction, ziel):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für eine Schichtübergabe.", ephemeral=True)
             return
@@ -146,7 +147,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtsetrolle")
-    async def schichtsetrolle(self, interaction: Interaction, rolle):
+    async def schichtsetrolle(self, interaction: discord.Interaction, rolle):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen Rollen setzen.", ephemeral=True)
             return
@@ -163,7 +164,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtremoverolle")
-    async def schichtremoverolle(self, interaction: Interaction, rolle):
+    async def schichtremoverolle(self, interaction: discord.Interaction, rolle):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen Rollen entfernen.", ephemeral=True)
             return
@@ -183,7 +184,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtsetvoice")
-    async def schichtsetvoice(self, interaction: Interaction, voice_channel):
+    async def schichtsetvoice(self, interaction: discord.Interaction, voice_channel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen den Ziel-Voice-Channel setzen.", ephemeral=True)
             return
@@ -198,7 +199,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtsetlog")
-    async def schichtsetlog(self, interaction: Interaction, log_channel):
+    async def schichtsetlog(self, interaction: discord.Interaction, log_channel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins dürfen den Log-Channel setzen.", ephemeral=True)
             return
@@ -213,7 +214,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtinfo")
-    async def schichtinfo(self, interaction: Interaction):
+    async def schichtinfo(self, interaction: discord.Interaction):
         if not is_schichtberechtigt(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
