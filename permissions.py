@@ -111,7 +111,7 @@ class PermissionsCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die Zugriff erhalten soll")
-    @app_commands.autocomplete(command=lambda self, interaction, current: self.command_autocomplete(interaction, current))
+    @app_commands.autocomplete(command=PermissionsCog.command_autocomplete)
     async def befehlpermission(self, interaction: Interaction, command: str, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
@@ -131,7 +131,7 @@ class PermissionsCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die entfernt werden soll")
-    @app_commands.autocomplete(command=lambda self, interaction, current: self.command_autocomplete(interaction, current))
+    @app_commands.autocomplete(command=PermissionsCog.command_autocomplete)
     async def befehlpermissionremove(self, interaction: Interaction, command: str, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
@@ -156,7 +156,7 @@ class PermissionsCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @app_commands.describe(command="Name des Befehls (ohne Slash)")
-    @app_commands.autocomplete(command=lambda self, interaction, current: self.command_autocomplete(interaction, current))
+    @app_commands.autocomplete(command=PermissionsCog.command_autocomplete)
     async def befehlpermissions(self, interaction: Interaction, command: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
