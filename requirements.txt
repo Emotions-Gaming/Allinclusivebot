@@ -1,2 +1,10 @@
+# Minimal und stabil für discord.py v2.3.2 (Railway getestet)
+
 discord.py==2.3.2
-python-dotenv==1.0.1
+python-dotenv
+
+# Optional: Logging, wenn du custom logs brauchst
+# logging
+
+# KEINE anderen Discord-Libraries wie py-cord, disnake, etc. installieren!
+# KEIN: py-cord, disnake, nextcord, etc.
