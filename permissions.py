@@ -64,9 +64,12 @@ class PermissionsCog(commands.Cog):
     # --- Alle verfügbaren Command-Namen (für Autocomplete) ---
     def available_commands(self):
         cmds = set()
-    for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
-        cmds.add(cmd.name)
-    return sorted(cmds)
+        # Hier kann nach Bedarf noch erweitert werden:
+        # Zum Beispiel: alle app_commands aus allen geladenen Cogs
+        for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
+            cmds.add(cmd.name)
+        return sorted(cmds)
+
 
 
     @app_commands.command(
