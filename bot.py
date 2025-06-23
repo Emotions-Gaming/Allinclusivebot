@@ -7,6 +7,8 @@ from discord import app_commands
 import traceback
 from datetime import datetime
 from dotenv import load_dotenv
+from discord import Interaction
+
 
 from permissions import has_permission_for
 

@@ -5,6 +5,8 @@ from discord.ext import commands
 from discord import app_commands, Interaction, Embed
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
+from discord import Interaction
+
 
 # -- Konfiguration
 PERSIST_DIR = "persistent_data"

@@ -4,6 +4,8 @@ from discord.ext import commands
 from discord import app_commands, Interaction, Member, TextChannel, Role, Embed
 from utils import is_admin, load_json, save_json, mention_roles
 from permissions import has_permission_for
+from discord import Interaction
+
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 STRIKE_DATA = "persistent_data/strike_data.json"
