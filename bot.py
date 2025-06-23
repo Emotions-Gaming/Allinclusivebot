@@ -68,8 +68,7 @@ bot = commands.Bot(
 )
 
 # === Extensions/Cogs ===
-COGS = [
-    "utils",
+COGS = [,
     "persist",
     "permissions",
     "setupbot",

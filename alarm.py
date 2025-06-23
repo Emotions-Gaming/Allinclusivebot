@@ -1,11 +1,10 @@
 ﻿import os
 import discord
 from discord.ext import commands
-from discord import app_commands, Interaction, TextChannel, CategoryChannel, Member, Role, Embed
+from discord import app_commands, Member, TextChannel, CategoryChannel, Role, Embed
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
-from discord import Interaction
-
+# Wichtig: KEIN from discord import Interaction !
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 ALARM_JSON = "persistent_data/alarm_config.json"
@@ -43,7 +42,6 @@ class AlarmCog(commands.Cog):
         channel = guild.get_channel(main_channel_id)
         if not channel:
             return
-        # Lösche altes Panel, wenn noch da
         try:
             if cfg.get("main_message_id"):
                 msg = await channel.fetch_message(cfg["main_message_id"])
@@ -75,7 +73,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmmain")
-    async def alarmmain(self, interaction: Interaction):
+    async def alarmmain(self, interaction: discord.Interaction):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -92,7 +90,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmlead")
-    async def alarmlead(self, interaction: Interaction, user: Member):
+    async def alarmlead(self, interaction: discord.Interaction, user: Member):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins.", ephemeral=True)
             return
@@ -108,7 +106,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmlead_remove")
-    async def alarmlead_remove(self, interaction: Interaction, user: Member):
+    async def alarmlead_remove(self, interaction: discord.Interaction, user: Member):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins.", ephemeral=True)
             return
@@ -127,7 +125,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmlead_info")
-    async def alarmlead_info(self, interaction: Interaction):
+    async def alarmlead_info(self, interaction: discord.Interaction):
         cfg = _load_alarm()
         guild = self.bot.get_guild(GUILD_ID)
         lead = guild.get_member(cfg["lead_id"]) if cfg["lead_id"] else None
@@ -143,7 +141,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmusers_add")
-    async def alarmusers_add(self, interaction: Interaction, role: Role):
+    async def alarmusers_add(self, interaction: discord.Interaction, role: Role):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -161,7 +159,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmusers_remove")
-    async def alarmusers_remove(self, interaction: Interaction, role: Role):
+    async def alarmusers_remove(self, interaction: discord.Interaction, role: Role):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -181,7 +179,7 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmlog")
-    async def alarmlog(self, interaction: Interaction, channel: TextChannel):
+    async def alarmlog(self, interaction: discord.Interaction, channel: TextChannel):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -197,16 +195,15 @@ class AlarmCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("alarmzuteilung")
-    async def alarmzuteilung(self, interaction: Interaction, user: Member):
+    async def alarmzuteilung(self, interaction: discord.Interaction, user: Member):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
-        # Modal für Schichtdaten (z. B. Name, Zeit)
         class ZuteilModal(discord.ui.Modal, title="Alarm-Schicht zuweisen"):
             streamer = discord.ui.TextInput(label="Name Streamer/Schicht", required=True, max_length=80)
             zeit = discord.ui.TextInput(label="Schicht (Datum/Uhrzeit)", required=True, max_length=80)
 
-            async def on_submit(self, modal_interaction: Interaction):
+            async def on_submit(self, modal_interaction: discord.Interaction):
                 try:
                     await user.send(
                         f"🚨 **Alarm-Schicht zugeteilt:**\n"
@@ -237,21 +234,18 @@ class AlarmPanelView(discord.ui.View):
         self.cog = cog
 
     @discord.ui.button(label="Schichtanfrage erstellen", style=discord.ButtonStyle.green, custom_id="alarm_request")
-    async def create_alarm_request(self, interaction: Interaction, button: discord.ui.Button):
-        # Nur Lead/Admin darf
+    async def create_alarm_request(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Nur AlarmLead/Admin.", ephemeral=True)
             return
-
         class AlarmRequestModal(discord.ui.Modal, title="Alarm-Schichtanfrage erstellen"):
             streamer = discord.ui.TextInput(label="Name Streamer/Schicht", required=True, max_length=80)
             zeit = discord.ui.TextInput(label="Schicht (Datum/Uhrzeit)", required=True, max_length=80)
 
-            async def on_submit(self, modal_interaction: Interaction):
+            async def on_submit(self, modal_interaction: discord.Interaction):
                 cfg = _load_alarm()
                 guild = interaction.guild or self.cog.bot.get_guild(GUILD_ID)
                 channel = guild.get_channel(cfg["main_channel_id"])
-                # Pingt alle Userrollen
                 role_pings = mention_roles(guild, cfg["user_role_ids"])
                 embed = Embed(
                     title="🚨 Neue Alarm-Schichtanfrage",
@@ -264,7 +258,7 @@ class AlarmPanelView(discord.ui.View):
                     color=0xe67e22
                 )
                 view = ClaimView(self.cog, self.streamer.value, self.zeit.value, interaction.user)
-                msg = await channel.send(embed=embed, view=view)
+                await channel.send(embed=embed, view=view)
                 await modal_interaction.response.send_message("✅ Alarmanfrage erstellt!", ephemeral=True)
 
         await interaction.response.send_modal(AlarmRequestModal())
@@ -278,7 +272,7 @@ class ClaimView(discord.ui.View):
         self.lead = lead
 
     @discord.ui.button(label="Schicht übernehmen", style=discord.ButtonStyle.blurple)
-    async def claim_alarm(self, interaction: Interaction, button: discord.ui.Button):
+    async def claim_alarm(self, interaction: discord.Interaction, button: discord.ui.Button):
         cfg = _load_alarm()
         guild = interaction.guild or self.cog.bot.get_guild(GUILD_ID)
         log_channel = guild.get_channel(cfg.get("log_channel_id"))
@@ -297,7 +291,6 @@ class ClaimView(discord.ui.View):
                 f"Streamer: **{self.streamer}**\n"
                 f"Zeit: **{self.zeit}**"
             )
-        # Lösche Anfrage-Message
         try:
             await interaction.message.delete()
         except Exception:

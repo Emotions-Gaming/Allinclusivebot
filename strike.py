@@ -1,11 +1,10 @@
 ﻿import os
 import discord
 from discord.ext import commands
-from discord import app_commands, Interaction, Member, TextChannel, Role, Embed
+from discord import app_commands, Member, TextChannel, Role, Embed
 from utils import is_admin, load_json, save_json, mention_roles
 from permissions import has_permission_for
-from discord import Interaction
-
+# WICHTIG: KEIN from discord import Interaction !!
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 STRIKE_DATA = "persistent_data/strike_data.json"
@@ -31,7 +30,6 @@ def _save_autorole(cfg):
     save_json(STRIKE_AUTOROLE, cfg)
 
 def get_log_channel(bot):
-    # Kann auch aus Config geladen werden, z. B. persistent_data/strike_log_channel.json
     log_cfg = load_json("persistent_data/strike_log_channel.json", {})
     gid = int(os.environ.get("GUILD_ID"))
     return bot.get_guild(gid).get_channel(log_cfg.get("log_channel_id")) if log_cfg.get("log_channel_id") else None
@@ -45,7 +43,6 @@ class StrikeCog(commands.Cog):
         self.bot = bot
 
     async def reload_menu(self):
-        # Panel im Main-Channel
         cfg = load_json("persistent_data/strike_panel.json", {})
         main_channel_id = cfg.get("main_channel_id")
         if not main_channel_id:
@@ -54,7 +51,6 @@ class StrikeCog(commands.Cog):
         channel = guild.get_channel(main_channel_id)
         if not channel:
             return
-        # Altes Panel löschen
         try:
             if cfg.get("main_message_id"):
                 msg = await channel.fetch_message(cfg["main_message_id"])
@@ -89,7 +85,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikemain")
-    async def strikemain(self, interaction: Interaction):
+    async def strikemain(self, interaction: discord.Interaction):   # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -105,7 +101,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeadd")
-    async def strikeadd(self, interaction: Interaction, user: Member, grund: str):
+    async def strikeadd(self, interaction: discord.Interaction, user: Member, grund: str):   # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
             return
@@ -134,7 +130,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeremove")
-    async def strikeremove(self, interaction: Interaction, user: Member):
+    async def strikeremove(self, interaction: discord.Interaction, user: Member):  # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
             return
@@ -164,7 +160,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeview")
-    async def strikeview(self, interaction: Interaction, user: Member):
+    async def strikeview(self, interaction: discord.Interaction, user: Member):  # HIER geändert!
         data = _load_strikes()
         strikes = data.get(str(user.id), [])
         if not strikes:
@@ -190,7 +186,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeautorole")
-    async def strikeautorole(self, interaction: Interaction, count: int, role: Role):
+    async def strikeautorole(self, interaction: discord.Interaction, count: int, role: Role):  # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
             return
@@ -209,7 +205,7 @@ class StrikeCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("strikeautorole_disable")
-    async def strikeautorole_disable(self, interaction: Interaction):
+    async def strikeautorole_disable(self, interaction: discord.Interaction):  # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
             return
@@ -225,7 +221,6 @@ class StrikeCog(commands.Cog):
         guild = user.guild
         role = guild.get_role(cfg["role_id"])
         count = strike_count(user.id)
-        # Vergabe/Entzug je nach Strikezahl
         if count >= cfg["count"]:
             if role and role not in user.roles:
                 try:
@@ -239,14 +234,13 @@ class StrikeCog(commands.Cog):
                 except Exception:
                     pass
 
-# ==== Panel-UI ====
 class StrikePanelView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
         self.cog = cog
 
     @discord.ui.button(label="Strike vergeben", style=discord.ButtonStyle.red, custom_id="strike_add")
-    async def add_strike(self, interaction: Interaction, button: discord.ui.Button):
+    async def add_strike(self, interaction: discord.Interaction, button: discord.ui.Button):  # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -255,7 +249,7 @@ class StrikePanelView(discord.ui.View):
         )
 
     @discord.ui.button(label="Strikes anzeigen", style=discord.ButtonStyle.blurple, custom_id="strike_view")
-    async def view_strikes(self, interaction: Interaction, button: discord.ui.Button):
+    async def view_strikes(self, interaction: discord.Interaction, button: discord.ui.Button):  # HIER geändert!
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -263,6 +257,5 @@ class StrikePanelView(discord.ui.View):
             "Nutze `/strikeview [@User]` um Strikes anzuzeigen.", ephemeral=True
         )
 
-# === Extension Loader ===
 async def setup(bot):
     await bot.add_cog(StrikeCog(bot))

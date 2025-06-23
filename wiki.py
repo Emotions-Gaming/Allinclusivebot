@@ -1,11 +1,9 @@
 ﻿import os
 import discord
 from discord.ext import commands
-from discord import app_commands, Interaction, TextChannel, Embed
+from discord import app_commands, TextChannel, Embed
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
-from discord import Interaction
-
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 PAGES_JSON = "persistent_data/wiki_pages.json"
@@ -34,7 +32,6 @@ class WikiCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # ==== reload_menu für setupbot ====
     async def reload_menu(self):
         main = _load_main()
         main_channel_id = main.get("main_channel_id")
@@ -44,7 +41,6 @@ class WikiCog(commands.Cog):
         channel = guild.get_channel(main_channel_id)
         if not channel:
             return
-        # Lösche alte Menüs vom Bot
         async for msg in channel.history(limit=30):
             if msg.author == self.bot.user and msg.embeds and "Wiki-Menü" in (msg.embeds[0].title or ""):
                 try:
@@ -52,8 +48,6 @@ class WikiCog(commands.Cog):
                 except Exception:
                     pass
         pages = _load_pages()
-        options = [discord.SelectOption(label=title, description=text[:70].replace("\n", " "))
-                   for title, text in list(pages.items())[:25]]
         embed = Embed(
             title="📚 Wiki-Menü",
             description="Wähle eine Seite aus dem Dropdown-Menü, um den Inhalt zu sehen.",
@@ -68,7 +62,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wikimain")
-    async def wikimain(self, interaction: Interaction, channel: TextChannel):
+    async def wikimain(self, interaction: discord.Interaction, channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -82,7 +76,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_page")
-    async def wiki_page(self, interaction: Interaction):
+    async def wiki_page(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -94,14 +88,12 @@ class WikiCog(commands.Cog):
             await interaction.response.send_message("❌ Kein Inhalt gefunden.", ephemeral=True)
             return
         text = messages[0].content.strip()
-        # Speichern
         pages = _load_pages()
         backup = _load_backup()
         pages[title] = text
         backup[title] = text
         _save_pages(pages)
         _save_backup(backup)
-        # Admin per DM schicken
         try:
             dm_embed = Embed(
                 title=f"📄 Wiki-Backup: {title}",
@@ -111,7 +103,6 @@ class WikiCog(commands.Cog):
             await interaction.user.send(embed=dm_embed)
         except Exception:
             pass
-        # Channel löschen
         try:
             await channel.delete()
         except Exception:
@@ -127,7 +118,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_delete")
-    async def wiki_delete(self, interaction: Interaction):
+    async def wiki_delete(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -150,7 +141,7 @@ class WikiCog(commands.Cog):
                 )
                 self.cog = cog
 
-            async def callback(self, interaction: Interaction):
+            async def callback(self, interaction: discord.Interaction):
                 pages = _load_pages()
                 backup = _load_backup()
                 if self.values[0] in pages:
@@ -174,7 +165,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_edit")
-    async def wiki_edit(self, interaction: Interaction):
+    async def wiki_edit(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -197,14 +188,14 @@ class WikiCog(commands.Cog):
                 )
                 self.cog = cog
 
-            async def callback(self, interaction: Interaction):
+            async def callback(self, interaction: discord.Interaction):
                 title = self.values[0]
                 old = _load_pages().get(title, "")
 
                 class EditModal(discord.ui.Modal, title=f"Wiki editieren: {title}"):
                     content = discord.ui.TextInput(label="Seiteninhalt", style=discord.TextStyle.paragraph, default=old, max_length=1800)
 
-                    async def on_submit(self, modal_interaction: Interaction):
+                    async def on_submit(self, modal_interaction: discord.Interaction):
                         pages = _load_pages()
                         backup = _load_backup()
                         pages[title] = self.content.value
@@ -228,7 +219,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_backup")
-    async def wiki_backup(self, interaction: Interaction):
+    async def wiki_backup(self, interaction: discord.Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -251,23 +242,20 @@ class WikiCog(commands.Cog):
                 )
                 self.cog = cog
 
-            async def callback(self, interaction: Interaction):
+            async def callback(self, interaction: discord.Interaction):
                 title = self.values[0]
                 text = _load_backup().get(title, "")
-                # Stelle als neuen Channel in aktuelle Kategorie her
                 category = interaction.channel.category
                 if not category:
                     await interaction.response.send_message("❌ Muss in einer Kategorie ausgeführt werden.", ephemeral=True)
                     return
                 guild = interaction.guild or self.cog.bot.get_guild(GUILD_ID)
-                # Channelnamen ggf. kürzen und prüfen
                 cname = f"wiki-{title}".replace(" ", "-").lower()[:90]
                 try:
                     new_ch = await guild.create_text_channel(cname, category=category)
                 except Exception:
                     await interaction.response.send_message("❌ Channel konnte nicht erstellt werden.", ephemeral=True)
                     return
-                # Text ggf. splitten
                 chunks = [text[i:i+1800] for i in range(0, len(text), 1800)]
                 for chunk in chunks:
                     await new_ch.send(chunk)
@@ -299,7 +287,7 @@ class WikiSelect(discord.ui.Select):
         )
         self.pages = pages
 
-    async def callback(self, interaction: Interaction):
+    async def callback(self, interaction: discord.Interaction):
         title = self.values[0]
         text = self.pages.get(title, "")
         embed = Embed(
@@ -309,6 +297,5 @@ class WikiSelect(discord.ui.Select):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-# ==== Extension Loader ====
 async def setup(bot):
     await bot.add_cog(WikiCog(bot))

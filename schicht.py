@@ -1,11 +1,9 @@
 ﻿import os
 import discord
 from discord.ext import commands
-from discord import app_commands, Interaction, TextChannel, Role, Embed, Member
+from discord import app_commands, TextChannel, Role, Embed, Member
 from utils import is_admin, load_json, save_json, mention_roles
 from permissions import has_permission_for
-from discord import Interaction
-
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 SCHICHT_CONFIG = "persistent_data/schicht_config.json"
@@ -31,7 +29,6 @@ class SchichtCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # ======= Hauptpanel / reload_menu =======
     async def reload_menu(self):
         cfg = _load_config()
         main_channel_id = cfg.get("main_channel_id")
@@ -41,7 +38,6 @@ class SchichtCog(commands.Cog):
         channel = guild.get_channel(main_channel_id)
         if not channel:
             return
-        # Lösche altes Panel, wenn noch da
         try:
             if cfg.get("main_message_id"):
                 msg = await channel.fetch_message(cfg["main_message_id"])
@@ -65,14 +61,13 @@ class SchichtCog(commands.Cog):
         cfg["main_message_id"] = msg.id
         _save_config(cfg)
 
-    # === Panel-Befehl ===
     @app_commands.command(
         name="schichtmain",
         description="Postet/zurücksetzt das Schicht-Hauptpanel"
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtmain")
-    async def schichtmain(self, interaction: Interaction):
+    async def schichtmain(self, interaction: discord.Interaction):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -82,14 +77,13 @@ class SchichtCog(commands.Cog):
         await self.reload_menu()
         await interaction.response.send_message("✅ Schicht-Panel gepostet!", ephemeral=True)
 
-    # === Rollen-/Leadmanagement ===
     @app_commands.command(
         name="schichtlead_add",
         description="Fügt eine Rolle als Schicht-Lead hinzu"
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtlead_add")
-    async def schichtlead_add(self, interaction: Interaction, role: Role):
+    async def schichtlead_add(self, interaction: discord.Interaction, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins.", ephemeral=True)
             return
@@ -107,7 +101,7 @@ class SchichtCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtlead_remove")
-    async def schichtlead_remove(self, interaction: Interaction, role: Role):
+    async def schichtlead_remove(self, interaction: discord.Interaction, role: Role):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins.", ephemeral=True)
             return
@@ -120,14 +114,13 @@ class SchichtCog(commands.Cog):
         else:
             await interaction.response.send_message("ℹ️ Diese Rolle war kein Lead.", ephemeral=True)
 
-    # === Log-Channel festlegen ===
     @app_commands.command(
         name="schichtlog",
         description="Setzt Log-Channel für Schichtübergaben"
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtlog")
-    async def schichtlog(self, interaction: Interaction, channel: TextChannel):
+    async def schichtlog(self, interaction: discord.Interaction, channel: TextChannel):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -136,14 +129,13 @@ class SchichtCog(commands.Cog):
         _save_config(cfg)
         await interaction.response.send_message(f"✅ Log-Channel gesetzt: {channel.mention}", ephemeral=True)
 
-    # === Panel-Text setzen ===
     @app_commands.command(
         name="schichtpanelinfo",
         description="Setzt Infotext für das Schicht-Panel"
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtpanelinfo")
-    async def schichtpanelinfo(self, interaction: Interaction, text: str):
+    async def schichtpanelinfo(self, interaction: discord.Interaction, text: str):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -153,14 +145,13 @@ class SchichtCog(commands.Cog):
         await self.reload_menu()
         await interaction.response.send_message("✅ Panel-Info aktualisiert.", ephemeral=True)
 
-    # === Schichtübergabe ===
     @app_commands.command(
         name="schichtuebergabe",
         description="Übergibt eine Schicht an einen Nutzer"
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("schichtuebergabe")
-    async def schichtuebergabe(self, interaction: Interaction, user: Member):
+    async def schichtuebergabe(self, interaction: discord.Interaction, user: Member):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Keine Berechtigung.", ephemeral=True)
             return
@@ -168,7 +159,7 @@ class SchichtCog(commands.Cog):
         class ÜbergabeModal(discord.ui.Modal, title="Schichtübergabe"):
             info = discord.ui.TextInput(label="Wichtige Hinweise (optional)", required=False, max_length=300)
 
-            async def on_submit(self, modal_interaction: Interaction):
+            async def on_submit(self, modal_interaction: discord.Interaction):
                 cfg = _load_config()
                 guild = interaction.guild or self.bot.get_guild(GUILD_ID)
                 log_channel = guild.get_channel(cfg.get("log_channel_id"))
@@ -181,10 +172,8 @@ class SchichtCog(commands.Cog):
                     ),
                     color=0x00b894
                 )
-                # Log-Channel
                 if log_channel:
                     await log_channel.send(embed=embed)
-                # DM an neuen Nutzer
                 try:
                     await user.send(
                         f"👮‍♂️ **Dir wurde eine Schicht übergeben!**\n"
@@ -197,14 +186,13 @@ class SchichtCog(commands.Cog):
 
         await interaction.response.send_modal(ÜbergabeModal())
 
-# ======= UI: PanelView =======
 class SchichtPanelView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
         self.cog = cog
 
     @discord.ui.button(label="Schichtübergabe starten", style=discord.ButtonStyle.green, custom_id="schicht_uebergabe")
-    async def start_uebergabe(self, interaction: Interaction, button: discord.ui.Button):
+    async def start_uebergabe(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not is_lead_or_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Lead/Admin!", ephemeral=True)
             return
@@ -212,6 +200,5 @@ class SchichtPanelView(discord.ui.View):
             "Nutze den Befehl `/schichtuebergabe [@Nutzer]` um gezielt zu übergeben!", ephemeral=True
         )
 
-# === Extension Loader ===
 async def setup(bot):
     await bot.add_cog(SchichtCog(bot))

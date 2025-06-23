@@ -63,16 +63,11 @@ class PermissionsCog(commands.Cog):
 
     # --- Alle verfügbaren Command-Namen (für Autocomplete) ---
     def available_commands(self):
-        cmds = set()
-        # Sammle alle Slash-Commands aus allen geladenen Cogs
-        for cog in self.bot.cogs.values():
-            if hasattr(cog, "app_commands"):
-                for command in getattr(cog, "app_commands", []):
-                    if isinstance(command, app_commands.Command):
-                        cmds.add(command.name)
-        for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
-            cmds.add(cmd.name)
-        return sorted(cmds)
+    cmds = set()
+    for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
+        cmds.add(cmd.name)
+    return sorted(cmds)
+
 
     @app_commands.command(
         name="refreshpermissions",
