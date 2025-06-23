@@ -1,10 +1,8 @@
-﻿import json
-import os
+﻿import os
+import json
 import logging
-import discord
-from discord import app_commands
-from discord import Member, Guild, Role
 from typing import List, Any, Optional
+from discord import Member, Guild, Role
 
 # =========================
 # 1. Rechte-Checks
@@ -14,22 +12,20 @@ def is_admin(user: Member) -> bool:
     """
     Prüft, ob der Nutzer die Administrator-Berechtigung hat.
     """
-    roles = getattr(user, "roles", [])
-    return any(getattr(role, "permissions", None) and role.permissions.administrator for role in roles)
+    # user.roles: List[Role]
+    return any(getattr(role.permissions, "administrator", False) for role in getattr(user, "roles", []))
 
 def has_role(user: Member, role_id: int) -> bool:
     """
     Prüft, ob der Nutzer eine bestimmte Rolle hat.
     """
-    roles = getattr(user, "roles", [])
-    return any(role.id == role_id for role in roles)
+    return any(role.id == role_id for role in getattr(user, "roles", []))
 
 def has_any_role(user: Member, role_ids: List[int]) -> bool:
     """
     Prüft, ob der Nutzer mindestens eine Rolle aus einer Liste hat.
     """
-    roles = getattr(user, "roles", [])
-    user_role_ids = {role.id for role in roles}
+    user_role_ids = {role.id for role in getattr(user, "roles", [])}
     return any(rid in user_role_ids for rid in role_ids)
 
 # =========================
@@ -78,7 +74,7 @@ def save_json(path: str, data: Any) -> None:
     """
     dir_path = os.path.dirname(path)
     if dir_path and not os.path.exists(dir_path):
-        os.makedirs(dir_path)
+        os.makedirs(dir_path, exist_ok=True)
     temp_path = f"{path}.tmp"
     try:
         with open(temp_path, "w", encoding="utf-8") as f:
@@ -97,8 +93,10 @@ def parse_mention(s: str) -> Optional[int]:
     Beispiel: '<@1234567890>' oder '<@!1234567890>' oder '<@&1234567890>'
     """
     import re
-    m = re.match(r"<@!?(\d+)>", s) or re.match(r"<@&(\d+)>", s)
-    return int(m.group(1)) if m else None
+    match = re.match(r"<@!?(\d+)>", s) or re.match(r"<@&(\d+)>", s)
+    if match:
+        return int(match.group(1))
+    return None
 
 def to_display_time(dt) -> str:
     """
@@ -114,10 +112,6 @@ def to_display_time(dt) -> str:
             return str(dt)
     return dt.strftime("%d.%m.%Y, %H:%M")
 
-# =========================
-# 5. Erweiterbar für weitere Hilfsfunktionen
-# =========================
-
 def get_role_names(guild: Guild, role_ids: List[int]) -> List[str]:
     """
     Gibt die Namen der Rollen zurück (für Logging/Debug).
@@ -125,7 +119,7 @@ def get_role_names(guild: Guild, role_ids: List[int]) -> List[str]:
     return [r.name for r in [guild.get_role(rid) for rid in role_ids] if r]
 
 # =========================
-# 6. Logging konfigurieren (einmal pro Bot-Prozess)
+# 5. Logging konfigurieren (einmal pro Bot-Prozess)
 # =========================
 
 logging.basicConfig(

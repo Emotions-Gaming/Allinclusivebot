@@ -1,13 +1,12 @@
 ﻿import os
 import shutil
 import logging
-import discord
 from discord.ext import commands
-from discord import app_commands, Embed
-from utils import is_admin  # <-- nutzt Rechte-Check aus utils.py
-from utils import load_json, save_json
+from discord import app_commands, Interaction, Embed
+from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
 
+# -- Konfiguration
 PERSIST_DIR = "persistent_data"
 BACKUP_DIR = "railway_data_backup"
 
@@ -27,7 +26,7 @@ DATA_FILES = [
     "wiki_main_channel.json",
     "commands_permissions.json",
     "setup_config.json",
-    # neue Dateien HIER ergänzen!
+    # Neue Dateien hier ergänzen!
 ]
 
 DATA_FILES = [os.path.join(PERSIST_DIR, f) for f in DATA_FILES]
@@ -60,7 +59,8 @@ def restore_now():
 
 def restore_missing_files():
     """
-    Beim Bot-Start: Falls Datei im Live-System fehlt, wird sie (falls vorhanden) aus dem Backup-Verzeichnis wiederhergestellt.
+    Beim Bot-Start: Falls Datei im Live-System fehlt,
+    wird sie (falls vorhanden) aus dem Backup-Verzeichnis wiederhergestellt.
     """
     ensure_dirs()
     for src, dest in zip(BACKUP_FILES, DATA_FILES):
@@ -77,8 +77,9 @@ class PersistCog(commands.Cog):
         name="backupnow",
         description="Erstellt sofort ein Backup aller kritischen Daten (nur Admins)"
     )
+    @app_commands.guilds(int(os.environ.get("GUILD_ID")))
     @has_permission_for("backupnow")
-    async def backupnow(self, interaction):  # Typen entfernen!
+    async def backupnow(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
             return
@@ -93,8 +94,9 @@ class PersistCog(commands.Cog):
         name="restorenow",
         description="Überschreibt ALLE Live-Daten mit dem letzten Backup! (nur Admins)"
     )
+    @app_commands.guilds(int(os.environ.get("GUILD_ID")))
     @has_permission_for("restorenow")
-    async def restorenow(self, interaction):  # Typen entfernen!
+    async def restorenow(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
             return
@@ -107,5 +109,24 @@ class PersistCog(commands.Cog):
             logging.error(f"Restore-Fehler: {e}")
             await interaction.response.send_message(f"❌ Fehler beim Restore: {e}", ephemeral=True)
 
+    @app_commands.command(
+        name="persiststatus",
+        description="Zeigt Status aller Daten-/Backupfiles (nur Admins)"
+    )
+    @app_commands.guilds(int(os.environ.get("GUILD_ID")))
+    @has_permission_for("persiststatus")
+    async def persiststatus(self, interaction: Interaction):
+        if not is_admin(interaction.user):
+            await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
+            return
+        ensure_dirs()
+        msg = "📦 **Persist/Backup-Status**\n\n"
+        for src, bkp in zip(DATA_FILES, BACKUP_FILES):
+            exists = "✅" if file_exists(src) else "❌"
+            backup = "🟢" if file_exists(bkp) else "⚠️"
+            msg += f"`{os.path.basename(src):<28}` {exists} | Backup: {backup}\n"
+        await interaction.response.send_message(msg, ephemeral=True)
+
+# === Extension Loader ===
 async def setup(bot):
     await bot.add_cog(PersistCog(bot))

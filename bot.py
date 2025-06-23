@@ -1,6 +1,4 @@
-﻿# bot.py
-
-import os
+﻿import os
 import sys
 import logging
 import discord
@@ -9,6 +7,7 @@ from discord import app_commands
 import traceback
 from datetime import datetime
 from dotenv import load_dotenv
+
 from permissions import has_permission_for
 
 # === Logging Setup ===
@@ -21,7 +20,6 @@ logging.basicConfig(
 log = logging.getLogger("bot")
 
 def log_event(msg, color=""):
-    # Optionale Farbcodes für die Konsole
     colors = {
         "green": "\033[92m",
         "red": "\033[91m",
@@ -69,14 +67,15 @@ bot = commands.Bot(
 
 # === Extensions/Cogs ===
 COGS = [
+    "utils",
     "persist",
     "permissions",
     "setupbot",
-    "translation",
-    "strike",
-    "wiki",
     "schicht",
-    "alarm"
+    "strike",
+    "translation",
+    "alarm",
+    "wiki"
 ]
 
 @bot.event
@@ -91,13 +90,13 @@ async def on_ready():
     try:
         log_event("🔄 Entferne alte Slash-Commands auf Guild…", "gray")
         # Wichtig: Das entfernt ALLE Commands für die GUILD und setzt sie neu!
-        await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
+        synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         log_event("🟢 Slash-Commands nur noch GUILD-basiert!", "green")
     except Exception as ex:
         log_event(f"❌ Fehler beim Command-Sync: {ex}", "red")
         traceback.print_exc()
 
-    # Liste geladener Extensions mit Status-Log
+    # Extensions laden
     loaded = []
     failed = []
     for cog in COGS:

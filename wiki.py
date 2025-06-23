@@ -1,9 +1,7 @@
-﻿# wiki.py
-
-import os
+﻿import os
 import discord
 from discord.ext import commands
-from discord import app_commands, Embed
+from discord import app_commands, Interaction, TextChannel, Embed
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
 
@@ -68,7 +66,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wikimain")
-    async def wikimain(self, interaction, channel):
+    async def wikimain(self, interaction: Interaction, channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -82,7 +80,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_page")
-    async def wiki_page(self, interaction):
+    async def wiki_page(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -127,7 +125,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_delete")
-    async def wiki_delete(self, interaction):
+    async def wiki_delete(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -150,7 +148,7 @@ class WikiCog(commands.Cog):
                 )
                 self.cog = cog
 
-            async def callback(self, interaction):
+            async def callback(self, interaction: Interaction):
                 pages = _load_pages()
                 backup = _load_backup()
                 if self.values[0] in pages:
@@ -174,7 +172,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_edit")
-    async def wiki_edit(self, interaction):
+    async def wiki_edit(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -197,14 +195,14 @@ class WikiCog(commands.Cog):
                 )
                 self.cog = cog
 
-            async def callback(self, interaction):
+            async def callback(self, interaction: Interaction):
                 title = self.values[0]
                 old = _load_pages().get(title, "")
 
                 class EditModal(discord.ui.Modal, title=f"Wiki editieren: {title}"):
                     content = discord.ui.TextInput(label="Seiteninhalt", style=discord.TextStyle.paragraph, default=old, max_length=1800)
 
-                    async def on_submit(self, modal_interaction):
+                    async def on_submit(self, modal_interaction: Interaction):
                         pages = _load_pages()
                         backup = _load_backup()
                         pages[title] = self.content.value
@@ -228,7 +226,7 @@ class WikiCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("wiki_backup")
-    async def wiki_backup(self, interaction):
+    async def wiki_backup(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -251,7 +249,7 @@ class WikiCog(commands.Cog):
                 )
                 self.cog = cog
 
-            async def callback(self, interaction):
+            async def callback(self, interaction: Interaction):
                 title = self.values[0]
                 text = _load_backup().get(title, "")
                 # Stelle als neuen Channel in aktuelle Kategorie her
@@ -299,7 +297,7 @@ class WikiSelect(discord.ui.Select):
         )
         self.pages = pages
 
-    async def callback(self, interaction):
+    async def callback(self, interaction: Interaction):
         title = self.values[0]
         text = self.pages.get(title, "")
         embed = Embed(

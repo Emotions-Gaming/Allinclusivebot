@@ -1,15 +1,9 @@
-﻿# translation.py
-
-import os
-import logging
-import discord
-import asyncio
+﻿import os
 import discord
 from discord.ext import commands
 from discord import app_commands, Interaction, TextChannel, CategoryChannel, Embed, Member
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
-
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 PROFILES_JSON = "persistent_data/profiles.json"
@@ -53,7 +47,7 @@ def _get_session_channel_name(profil, member):
 
 async def dummy_translate(text, prompt):
     # Hier KI-API ersetzen – Demo: Einfach reversed string als "Übersetzung"
-    await asyncio.sleep(1)
+    await discord.utils.sleep_until(discord.utils.utcnow())  # Dummy, direkt zurück ohne Wartezeit
     return f"{text[::-1]} [Style:{prompt}]"
 
 class TranslationCog(commands.Cog):
@@ -77,7 +71,6 @@ class TranslationCog(commands.Cog):
                     await msg.delete()
                 except Exception:
                     pass
-        # Neues Menü posten
         embed = Embed(
             title="🌐 Übersetzungsmenü",
             description="Wähle einen Übersetzer-Stil aus, um deine Session zu starten.",
@@ -93,7 +86,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorpost")
-    async def translatorpost(self, interaction: discord.Interaction):
+    async def translatorpost(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -109,7 +102,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatoraddprofile")
-    async def translatoraddprofile(self, interaction: discord.Interaction, name: str, stil: str):
+    async def translatoraddprofile(self, interaction: Interaction, name: str, stil: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -128,7 +121,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatordeleteprofile")
-    async def translatordeleteprofile(self, interaction: discord.Interaction, name: str):
+    async def translatordeleteprofile(self, interaction: Interaction, name: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -147,7 +140,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorsetcategorie")
-    async def translatorsetcategorie(self, interaction: discord.Interaction, category: CategoryChannel):
+    async def translatorsetcategorie(self, interaction: Interaction, category: CategoryChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -160,7 +153,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorlog")
-    async def translatorlog(self, interaction: discord.Interaction, channel: TextChannel):
+    async def translatorlog(self, interaction: Interaction, channel: TextChannel):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -175,7 +168,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorprompt")
-    async def translatorprompt(self, interaction: discord.Interaction, regel: str):
+    async def translatorprompt(self, interaction: Interaction, regel: str):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -188,7 +181,7 @@ class TranslationCog(commands.Cog):
     )
     @app_commands.guilds(GUILD_ID)
     @has_permission_for("translatorpromptdelete")
-    async def translatorpromptdelete(self, interaction: discord.Interaction):
+    async def translatorpromptdelete(self, interaction: Interaction):
         if not is_admin(interaction.user):
             await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
             return
@@ -211,7 +204,7 @@ class ProfileSelect(discord.ui.Select):
         super().__init__(placeholder="Profil auswählen…", options=options)
         self.cog = cog
 
-    async def callback(self, interaction: discord.Interaction):
+    async def callback(self, interaction: Interaction):
         profil = self.values[0]
         member = interaction.user
         category_id = _load_category()
@@ -257,7 +250,7 @@ class SessionEndView(discord.ui.View):
         self.profil = profil
 
     @discord.ui.button(label="Session beenden & Verlauf senden", style=discord.ButtonStyle.red)
-    async def end_session(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def end_session(self, interaction: Interaction, button: discord.ui.Button):
         # Letzte 10 Übersetzungen sammeln
         messages = [msg async for msg in self.channel.history(limit=50) if msg.author == self.cog.bot.user and msg.embeds]
         last = messages[:10]
@@ -292,7 +285,9 @@ async def on_message(self, message):
     category_id = _load_category()
     if not category_id or message.channel.category_id != category_id:
         return
-    # Prüfe Rechte
+    # Nur Sessionowner/Admin darf posten
+    # Erlaubt, dass nur Session-User und Admins übersetzen dürfen
+    # Achtung: Wenn nur eine Person im Channel ist, reicht das meist
     if message.author != message.channel.recipient and not is_admin(message.author):
         return
 
