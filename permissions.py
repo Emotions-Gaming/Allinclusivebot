@@ -1,178 +1,137 @@
-﻿import os
-import logging
+﻿# permissions.py
+
 import discord
+from discord import app_commands, Interaction
 from discord.ext import commands
-from discord import app_commands, Interaction, Role, Guild
-from utils import is_admin, load_json, save_json, mention_roles
-from discord import Interaction
+import os
+import utils
+import asyncio
 
-
-
-PERMISSIONS_FILE = "persistent_data/commands_permissions.json"
-
-try:
-    GUILD_ID = int(os.environ.get("GUILD_ID"))
-except Exception:
-    GUILD_ID = None
-
-def get_guild(bot: commands.Bot) -> Guild:
-    if GUILD_ID is None:
-        return None
-    return bot.get_guild(GUILD_ID)
-
-# === Decorator für Command-Checks ===
-def has_permission_for(command_name):
-    def predicate(func):
-        async def wrapper(self, interaction: Interaction, *args, **kwargs):
-            # Admins immer Zugriff
-            if is_admin(interaction.user):
-                return await func(self, interaction, *args, **kwargs)
-            config = load_json(PERMISSIONS_FILE, {})
-            allowed_roles = set(config.get(command_name, []))
-            if not allowed_roles:
-                await interaction.response.send_message("❌ Du hast keine Berechtigung.", ephemeral=True)
-                return
-            user_roles = {r.id for r in getattr(interaction.user, "roles", [])}
-            if user_roles & allowed_roles:
-                return await func(self, interaction, *args, **kwargs)
-            await interaction.response.send_message("❌ Du hast keine Berechtigung.", ephemeral=True)
-        # Explizite Typisierung für discord.py
-        wrapper.__annotations__ = getattr(func, "__annotations__", {}).copy()
-        wrapper.__annotations__["interaction"] = Interaction
-        return wrapper
-    return predicate
-
-# --- AUTOCOMPLETE für Command-Namen ---
-async def command_autocomplete(interaction: Interaction, current: str):
-    cog = interaction.client.get_cog('PermissionsCog')
-    if cog is not None:
-        cmds = [cmd for cmd in cog.available_commands() if current.lower() in cmd.lower()]
-        return [app_commands.Choice(name=cmd, value=cmd) for cmd in cmds[:25]]
-    return []
+GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+PERMISSIONS_PATH = os.path.join("persistent_data", "commands_permissions.json")
 
 class PermissionsCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        if not os.path.exists(PERMISSIONS_FILE):
-            save_json(PERMISSIONS_FILE, {})  # Initialisieren
 
-    def _load(self):
-        return load_json(PERMISSIONS_FILE, {})
+    # ===== Interne Helper =====
 
-    def _save(self, data):
-        save_json(PERMISSIONS_FILE, data)
+    async def get_allowed_roles(self, command_name: str) -> list[int]:
+        """Liefert erlaubte Rollen-IDs für einen Command."""
+        perms = await utils.load_json(PERMISSIONS_PATH, {})
+        return perms.get(command_name, [])
 
-    # --- Alle verfügbaren Command-Namen (für Autocomplete) ---
-    def available_commands(self):
-        cmds = set()
-        # Hier kann nach Bedarf noch erweitert werden:
-        # Zum Beispiel: alle app_commands aus allen geladenen Cogs
-        for cmd in self.bot.tree.get_commands(guild=get_guild(self.bot)):
-            cmds.add(cmd.name)
-        return sorted(cmds)
+    async def set_allowed_roles(self, command_name: str, role_ids: list[int]):
+        perms = await utils.load_json(PERMISSIONS_PATH, {})
+        perms[command_name] = role_ids
+        await utils.save_json(PERMISSIONS_PATH, perms)
 
+    async def has_command_permission(self, member: discord.Member, command_name: str) -> bool:
+        # Admins haben IMMER alle Rechte
+        if utils.is_admin(member):
+            return True
+        allowed = await self.get_allowed_roles(command_name)
+        return utils.has_any_role(member, allowed)
 
-
-    @app_commands.command(
-        name="refreshpermissions",
-        description="Synchronisiert alle Slash-Command-Berechtigungen laut Config (nur Admins)"
-    )
-    @app_commands.guilds(GUILD_ID)
-    async def refreshpermissions(self, interaction: Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
-            return
-        guild = get_guild(self.bot)
-        if not guild:
-            await interaction.response.send_message("❌ Guild nicht gefunden (GUILD_ID prüfen)!", ephemeral=True)
-            return
-        config = self._load()
-        synced, failed = 0, 0
-        for command in self.bot.tree.get_commands(guild=guild):
-            name = command.name
-            allowed_roles = config.get(name, [])
-            try:
-                role_objs = [guild.get_role(rid) for rid in allowed_roles]
-                role_ids = [r.id for r in role_objs if r]
-                # In discord.py >=2.5 werden Permissions zentral über Rollen geregelt,
-                # aber per API sind keine expliziten Rollen-Permissions auf Slash-Commands mehr.
-                synced += 1
-            except Exception as e:
-                logging.error(f"Fehler beim Sync von Command {name}: {e}")
-                failed += 1
-        await interaction.response.send_message(
-            f"🔄 Permissions refresh abgeschlossen: {synced} Command(s) verarbeitet, {failed} Fehler.", ephemeral=True
-        )
+    # ===== Slash Commands =====
 
     @app_commands.command(
         name="befehlpermission",
-        description="Gibt einer Rolle Zugriff auf einen Slash-Command (nur Admins)"
+        description="Gibt einer Rolle das Recht, einen Command zu nutzen (Admin only)."
     )
     @app_commands.guilds(GUILD_ID)
-    @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die Zugriff erhalten soll")
-    @app_commands.autocomplete(command=command_autocomplete)
-    async def befehlpermission(self, interaction: Interaction, command: str, role: Role):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
-            return
-        config = self._load()
-        allowed = set(config.get(command, []))
-        allowed.add(role.id)
-        config[command] = list(allowed)
-        self._save(config)
-        await interaction.response.send_message(
-            f"✅ Rolle {role.mention} hat nun Zugriff auf /{command}. (Bitte /refreshpermissions ausführen!)", ephemeral=True
-        )
+    async def add_permission(self, interaction: Interaction, command: str, role: discord.Role):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        command = command.lower()
+        # Existiert der Command?
+        if not any(cmd.name == command for cmd in self.bot.tree.get_commands(guild=discord.Object(GUILD_ID))):
+            return await utils.send_error(interaction, f"Command `{command}` existiert nicht!")
+        # Hole aktuelle Rollen
+        allowed = await self.get_allowed_roles(command)
+        if role.id in allowed:
+            return await utils.send_error(interaction, f"{role.mention} darf `{command}` bereits nutzen.")
+        allowed.append(role.id)
+        await self.set_allowed_roles(command, allowed)
+        await utils.send_success(interaction, f"{role.mention} darf jetzt `{command}` ausführen.\nVergiss nicht `/refreshpermissions` auszuführen!")
 
     @app_commands.command(
         name="befehlpermissionremove",
-        description="Entzieht einer Rolle den Zugriff auf einen Slash-Command (nur Admins)"
+        description="Entzieht einer Rolle das Recht für einen Command (Admin only)."
     )
     @app_commands.guilds(GUILD_ID)
-    @app_commands.describe(command="Name des Befehls (ohne Slash)", role="Rolle, die entfernt werden soll")
-    @app_commands.autocomplete(command=command_autocomplete)
-    async def befehlpermissionremove(self, interaction: Interaction, command: str, role: Role):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
-            return
-        config = self._load()
-        allowed = set(config.get(command, []))
-        if role.id in allowed:
-            allowed.remove(role.id)
-            config[command] = list(allowed)
-            self._save(config)
-            await interaction.response.send_message(
-                f"✅ Rolle {role.mention} wurde von /{command} entfernt. (Bitte /refreshpermissions ausführen!)", ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                f"ℹ️ Diese Rolle hatte keinen Zugriff auf /{command}.", ephemeral=True
-            )
+    async def remove_permission(self, interaction: Interaction, command: str, role: discord.Role):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        command = command.lower()
+        allowed = await self.get_allowed_roles(command)
+        if role.id not in allowed:
+            return await utils.send_error(interaction, f"{role.mention} hatte kein Recht für `{command}`.")
+        allowed.remove(role.id)
+        await self.set_allowed_roles(command, allowed)
+        await utils.send_success(interaction, f"{role.mention} darf `{command}` nun nicht mehr nutzen.\nBitte `/refreshpermissions` ausführen!")
 
     @app_commands.command(
         name="befehlpermissions",
-        description="Zeigt alle erlaubten Rollen für einen Command"
+        description="Zeigt die erlaubten Rollen für einen Command (Admin only)."
     )
     @app_commands.guilds(GUILD_ID)
-    @app_commands.describe(command="Name des Befehls (ohne Slash)")
-    @app_commands.autocomplete(command=command_autocomplete)
-    async def befehlpermissions(self, interaction: Interaction, command: str):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Du hast keine Adminrechte!", ephemeral=True)
-            return
-        guild = get_guild(self.bot)
-        config = self._load()
-        role_ids = config.get(command, [])
-        if role_ids:
-            mentions = mention_roles(guild, role_ids)
-            await interaction.response.send_message(
-                f"🔒 Zugriff auf /{command}: {mentions}", ephemeral=True
-            )
-        else:
-            await interaction.response.send_message(
-                f"🔒 Kein Zugriff gesetzt für /{command} (außer Admins)", ephemeral=True
-            )
+    async def list_permissions(self, interaction: Interaction, command: str):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        command = command.lower()
+        allowed = await self.get_allowed_roles(command)
+        rolestr = utils.pretty_role_list(interaction.guild, allowed)
+        await utils.send_ephemeral(
+            interaction,
+            text=f"**Zugriff für `{command}`:**\n{rolestr}",
+            emoji="🛡️",
+            color=discord.Color.blurple()
+        )
 
-# === Setup-Funktion für Extension-Loader ===
+    @app_commands.command(
+        name="refreshpermissions",
+        description="Synchronisiert alle Slash-Command-Rechte auf dem Server (Admin only)."
+    )
+    @app_commands.guilds(GUILD_ID)
+    async def refresh_permissions(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        perms = await utils.load_json(PERMISSIONS_PATH, {})
+        cmds = self.bot.tree.get_commands(guild=discord.Object(GUILD_ID))
+        count = 0
+        for cmd in cmds:
+            roles = perms.get(cmd.name, [])
+            # Baue CommandPermissions
+            # Admins haben IMMER Zugriff
+            admin_ids = [r.id for r in interaction.guild.roles if r.permissions.administrator]
+            allow_roles = list(set(roles + admin_ids))
+            try:
+                await cmd.edit(
+                    guild=interaction.guild,
+                    default_member_permissions=None,
+                    dm_permission=False,
+                    # roles dürfen explizit den Command nutzen
+                    # Discord.py v2.4+: roles param als Liste von discord.Role (NICHT role IDs!)
+                    roles=[interaction.guild.get_role(rid) for rid in allow_roles if interaction.guild.get_role(rid)]
+                )
+                count += 1
+            except Exception as e:
+                print(f"[permissions.py] Fehler beim Sync für {cmd.name}: {e}")
+        await utils.send_success(interaction, f"**{count} Slash-Commands** wurden für diese Guild synchronisiert.\nAlle Berechtigungen sind jetzt aktiv.")
+
+    # ===== Helper für andere Cogs (exportiert) =====
+
+    async def user_has_permission(self, member: discord.Member, command_name: str) -> bool:
+        """Kann von anderen Cogs importiert werden."""
+        return await self.has_command_permission(member, command_name)
+
+# ==== Cog Setup ====
+
 async def setup(bot):
     await bot.add_cog(PermissionsCog(bot))
+
+# ===== HowTo (für andere Cogs): =====
+# import permissions
+# await permissions.user_has_permission(member, "strikegive")
+# if nicht erlaubt: await utils.send_permission_denied(interaction)

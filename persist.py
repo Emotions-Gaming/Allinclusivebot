@@ -1,18 +1,20 @@
-﻿import os
-import shutil
-import logging
-from discord.ext import commands
-from discord import app_commands, Interaction, Embed
-from utils import is_admin, load_json, save_json
-from permissions import has_permission_for
-from discord import Interaction
+﻿# persist.py
 
+import discord
+from discord import app_commands, Interaction
+from discord.ext import commands, tasks
+import os
+import aiofiles
+import asyncio
+from datetime import datetime, timezone
+import utils
 
+GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+PERSIST_PATH = "persistent_data"
+BACKUP_ROOT = "railway_data_backup"
+LOG_CHANNEL_PATH = os.path.join(PERSIST_PATH, "persist_log_channel.json")  # Speichert optional den Log-Channel
 
-# -- Konfiguration
-PERSIST_DIR = "persistent_data"
-BACKUP_DIR = "railway_data_backup"
-
+# Hier alle kritischen Dateien eintragen (nur Filenamen, keine Pfade)
 DATA_FILES = [
     "strike_data.json",
     "strike_roles.json",
@@ -20,116 +22,180 @@ DATA_FILES = [
     "schicht_config.json",
     "alarm_config.json",
     "profiles.json",
-    "translator_menu.json",
-    "translator_prompt.json",
-    "trans_category.json",
     "translation_log.json",
+    "translator_prompt.json",
+    "translator_menu.json",
+    "trans_category.json",
+    "translator_log.json",
     "wiki_pages.json",
     "wiki_backup.json",
     "wiki_main_channel.json",
-    "commands_permissions.json",
     "setup_config.json",
-    # Neue Dateien hier ergänzen!
+    "commands_permissions.json"
 ]
 
-DATA_FILES = [os.path.join(PERSIST_DIR, f) for f in DATA_FILES]
-BACKUP_FILES = [os.path.join(BACKUP_DIR, os.path.basename(f)) for f in DATA_FILES]
+# ===== Helper =====
+def get_timestamp():
+    return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
-def ensure_dirs():
-    """Stellt sicher, dass beide Verzeichnisse existieren."""
-    for d in (PERSIST_DIR, BACKUP_DIR):
-        if not os.path.exists(d):
-            os.makedirs(d)
+async def ensure_dir(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception as e:
+        print(f"[persist.py] Fehler beim Anlegen von {path}: {e}")
 
-def file_exists(path):
-    return os.path.isfile(path)
+async def get_log_channel(bot):
+    cfg = await utils.load_json(LOG_CHANNEL_PATH, {})
+    if "log_channel_id" in cfg:
+        chan = bot.get_channel(cfg["log_channel_id"])
+        return chan
+    return None
 
-def backup_now():
-    """Kopiert alle Live-Daten ins Backup-Verzeichnis."""
-    ensure_dirs()
-    for src, dest in zip(DATA_FILES, BACKUP_FILES):
-        if file_exists(src):
-            shutil.copy2(src, dest)
-    logging.info("Backup erfolgreich durchgeführt.")
-
-def restore_now():
-    """Kopiert alle Backup-Daten zurück ins Live-Verzeichnis."""
-    ensure_dirs()
-    for src, dest in zip(BACKUP_FILES, DATA_FILES):
-        if file_exists(src):
-            shutil.copy2(src, dest)
-    logging.info("Restore erfolgreich durchgeführt.")
-
-def restore_missing_files():
-    """
-    Beim Bot-Start: Falls Datei im Live-System fehlt,
-    wird sie (falls vorhanden) aus dem Backup-Verzeichnis wiederhergestellt.
-    """
-    ensure_dirs()
-    for src, dest in zip(BACKUP_FILES, DATA_FILES):
-        if not file_exists(dest) and file_exists(src):
-            shutil.copy2(src, dest)
-            logging.warning(f"{os.path.basename(dest)} fehlte und wurde aus Backup wiederhergestellt.")
+# ===== Persist Cog =====
 
 class PersistCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        restore_missing_files()  # Startup-Check!
+        self.automatic_backup_interval = 4  # in Stunden (anpassbar)
+        self.automatic_backup.start()
+
+    async def cog_load(self):
+        await self.restore_missing_files()  # Automatisches Restore beim Start
+
+    async def restore_missing_files(self):
+        await ensure_dir(PERSIST_PATH)
+        await ensure_dir(BACKUP_ROOT)
+        restored = 0
+        for fname in DATA_FILES:
+            live = os.path.join(PERSIST_PATH, fname)
+            backup = os.path.join(BACKUP_ROOT, fname)
+            if not os.path.exists(live) and os.path.exists(backup):
+                await utils.atomic_copy(backup, live)
+                restored += 1
+        print(f"[persist.py] Automatisch {restored} Dateien beim Start restauriert.")
+
+    # -------------- Commands --------------
 
     @app_commands.command(
         name="backupnow",
-        description="Erstellt sofort ein Backup aller kritischen Daten (nur Admins)"
+        description="Erstellt sofort ein vollständiges Backup aller Bot-Daten (Admin-Only)."
     )
-    @app_commands.guilds(int(os.environ.get("GUILD_ID")))
-    @has_permission_for("backupnow")
-    async def backupnow(self, interaction: Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
-            return
-        try:
-            backup_now()
-            await interaction.response.send_message("✅ Backup aller Daten erfolgreich durchgeführt!", ephemeral=True)
-        except Exception as e:
-            logging.error(f"Backup-Fehler: {e}")
-            await interaction.response.send_message(f"❌ Fehler beim Backup: {e}", ephemeral=True)
+    @app_commands.guilds(GUILD_ID)
+    async def backup_now(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+
+        timestamp = get_timestamp()
+        backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+        await ensure_dir(backup_dir)
+
+        copied = 0
+        missing = []
+        for fname in DATA_FILES:
+            src = os.path.join(PERSIST_PATH, fname)
+            dst = os.path.join(backup_dir, fname)
+            if os.path.exists(src):
+                await utils.atomic_copy(src, dst)
+                copied += 1
+            else:
+                missing.append(fname)
+
+        # Optional: aktuelles Set als "latest" zusätzlich kopieren (direkt im root)
+        for fname in DATA_FILES:
+            src = os.path.join(PERSIST_PATH, fname)
+            dst = os.path.join(BACKUP_ROOT, fname)
+            if os.path.exists(src):
+                await utils.atomic_copy(src, dst)
+
+        await utils.send_success(
+            interaction,
+            text=f"Backup abgeschlossen: **{copied}** Dateien gesichert (`{timestamp}`)\n{'⚠️ Folgende Dateien fehlten: ' + ', '.join(missing) if missing else ''}"
+        )
+        await self.log_action(f"Backup durchgeführt ({copied} Dateien, {timestamp}).")
 
     @app_commands.command(
         name="restorenow",
-        description="Überschreibt ALLE Live-Daten mit dem letzten Backup! (nur Admins)"
+        description="Stellt alle Daten aus dem letzten Backup wieder her (Admin-Only, überschreibt alles!)."
     )
-    @app_commands.guilds(int(os.environ.get("GUILD_ID")))
-    @has_permission_for("restorenow")
-    async def restorenow(self, interaction: Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Du hast keine Berechtigung für diesen Befehl.", ephemeral=True)
-            return
-        try:
-            restore_now()
-            await interaction.response.send_message(
-                "✅ Restore abgeschlossen! (Bitte Bot neu starten!)", ephemeral=True
-            )
-        except Exception as e:
-            logging.error(f"Restore-Fehler: {e}")
-            await interaction.response.send_message(f"❌ Fehler beim Restore: {e}", ephemeral=True)
+    @app_commands.guilds(GUILD_ID)
+    async def restore_now(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+
+        copied = 0
+        missing = []
+        for fname in DATA_FILES:
+            src = os.path.join(BACKUP_ROOT, fname)
+            dst = os.path.join(PERSIST_PATH, fname)
+            if os.path.exists(src):
+                await utils.atomic_copy(src, dst)
+                copied += 1
+            else:
+                missing.append(fname)
+        await utils.send_ephemeral(
+            interaction,
+            text=f"Restore abgeschlossen: **{copied}** Dateien wiederhergestellt.\n{'⚠️ Folgende Dateien fehlen im Backup: ' + ', '.join(missing) if missing else ''}\n\n**Bot-Neustart empfohlen!**",
+            emoji="♻️",
+            color=discord.Color.blurple()
+        )
+        await self.log_action(f"Restore durchgeführt ({copied} Dateien). Neustart empfohlen.")
 
     @app_commands.command(
-        name="persiststatus",
-        description="Zeigt Status aller Daten-/Backupfiles (nur Admins)"
+        name="persistlogchannel",
+        description="Setzt den Log-Channel für Persistenz-Events."
     )
-    @app_commands.guilds(int(os.environ.get("GUILD_ID")))
-    @has_permission_for("persiststatus")
-    async def persiststatus(self, interaction: Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Keine Berechtigung!", ephemeral=True)
-            return
-        ensure_dirs()
-        msg = "📦 **Persist/Backup-Status**\n\n"
-        for src, bkp in zip(DATA_FILES, BACKUP_FILES):
-            exists = "✅" if file_exists(src) else "❌"
-            backup = "🟢" if file_exists(bkp) else "⚠️"
-            msg += f"`{os.path.basename(src):<28}` {exists} | Backup: {backup}\n"
-        await interaction.response.send_message(msg, ephemeral=True)
+    @app_commands.guilds(GUILD_ID)
+    async def set_log_channel(self, interaction: Interaction, channel: discord.TextChannel):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        await utils.save_json(LOG_CHANNEL_PATH, {"log_channel_id": channel.id})
+        await utils.send_success(interaction, f"Persistenz-Log-Channel gesetzt: {channel.mention}")
 
-# === Extension Loader ===
+    # -------------- Automatisches Backup --------------
+
+    @tasks.loop(hours=4)
+    async def automatic_backup(self):
+        await self.backup_task()
+
+    @automatic_backup.before_loop
+    async def before_automatic_backup(self):
+        await self.bot.wait_until_ready()
+
+    async def backup_task(self):
+        timestamp = get_timestamp()
+        backup_dir = os.path.join(BACKUP_ROOT, timestamp)
+        await ensure_dir(backup_dir)
+        copied = 0
+        for fname in DATA_FILES:
+            src = os.path.join(PERSIST_PATH, fname)
+            dst = os.path.join(backup_dir, fname)
+            if os.path.exists(src):
+                await utils.atomic_copy(src, dst)
+                copied += 1
+        # Aktuelles Set als "latest" kopieren
+        for fname in DATA_FILES:
+            src = os.path.join(PERSIST_PATH, fname)
+            dst = os.path.join(BACKUP_ROOT, fname)
+            if os.path.exists(src):
+                await utils.atomic_copy(src, dst)
+        # Optional Log-Channel-Info
+        await self.log_action(f"Automatisches Backup ({copied} Dateien, {timestamp}).")
+
+    # -------------- Logging-Helper --------------
+
+    async def log_action(self, text):
+        logchan = await get_log_channel(self.bot)
+        if logchan:
+            embed = discord.Embed(
+                description=f"🗂️ **Persistenz-Event**\n{text}\n`{get_timestamp()}`",
+                color=discord.Color.teal()
+            )
+            try:
+                await logchan.send(embed=embed)
+            except Exception as e:
+                print(f"[persist.py] Fehler beim Schreiben in Logchannel: {e}")
+
+    # -------------- Setup --------------
+    # Nochmal: setup.py-style Registrierung
 async def setup(bot):
     await bot.add_cog(PersistCog(bot))

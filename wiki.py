@@ -1,303 +1,314 @@
-﻿import os
+﻿# wiki.py
+
 import discord
+from discord import app_commands, Interaction
 from discord.ext import commands
-from discord import app_commands, TextChannel, Embed
-from utils import is_admin, load_json, save_json
-from permissions import has_permission_for
-from discord import Interaction
+import os
+import utils
+from datetime import datetime
 
+GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+WIKI_PAGES_PATH = os.path.join("persistent_data", "wiki_pages.json")
+WIKI_BACKUP_PATH = os.path.join("persistent_data", "wiki_backup.json")
+WIKI_MAIN_CHANNEL_PATH = os.path.join("persistent_data", "wiki_main_channel.json")
 
-GUILD_ID = int(os.environ.get("GUILD_ID"))
-PAGES_JSON = "persistent_data/wiki_pages.json"
-BACKUP_JSON = "persistent_data/wiki_backup.json"
-MAIN_CHANNEL_JSON = "persistent_data/wiki_main_channel.json"
+MAX_DROPDOWN = 25
 
-def _load_pages():
-    return load_json(PAGES_JSON, {})
+# ========== Helper ==========
+async def get_pages():
+    return await utils.load_json(WIKI_PAGES_PATH, {})
 
-def _save_pages(pages):
-    save_json(PAGES_JSON, pages)
+async def save_pages(data):
+    await utils.save_json(WIKI_PAGES_PATH, data)
 
-def _load_backup():
-    return load_json(BACKUP_JSON, {})
+async def get_backup():
+    return await utils.load_json(WIKI_BACKUP_PATH, {})
 
-def _save_backup(bkp):
-    save_json(BACKUP_JSON, bkp)
+async def save_backup(data):
+    await utils.save_json(WIKI_BACKUP_PATH, data)
 
-def _load_main():
-    return load_json(MAIN_CHANNEL_JSON, {})
+async def get_main_channel_id():
+    return await utils.load_json(WIKI_MAIN_CHANNEL_PATH, 0)
 
-def _save_main(data):
-    save_json(MAIN_CHANNEL_JSON, data)
+async def set_main_channel_id(cid):
+    await utils.save_json(WIKI_MAIN_CHANNEL_PATH, cid)
+
+def chunk_text(text, size=1800):
+    return [text[i:i+size] for i in range(0, len(text), size)]
+
+# ========== Dropdowns/Views ==========
+
+class WikiMenuView(discord.ui.View):
+    def __init__(self, pages: dict):
+        super().__init__(timeout=None)
+        options = [
+            discord.SelectOption(label=title[:100], value=title)
+            for title in list(pages.keys())[:MAX_DROPDOWN]
+        ]
+        self.add_item(WikiDropdown(options, pages))
+
+class WikiDropdown(discord.ui.Select):
+    def __init__(self, options, pages):
+        super().__init__(placeholder="Wähle eine Wiki-Seite…", options=options, min_values=1, max_values=1)
+        self.pages = pages
+
+    async def callback(self, interaction: Interaction):
+        page = self.pages.get(self.values[0])
+        embed = discord.Embed(
+            title=f"📖 {self.values[0]}",
+            description=page if page else "_Kein Inhalt gefunden._",
+            color=discord.Color.blurple()
+        )
+        await utils.send_ephemeral(interaction, embed=embed)
+
+# ========== Slash Commands ==========
 
 class WikiCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    async def reload_menu(self):
-        main = _load_main()
-        main_channel_id = main.get("main_channel_id")
-        if not main_channel_id:
+    # Helper to (re)post the Wiki Menu
+    async def reload_menu(self, channel_id=None):
+        cid = channel_id or await get_main_channel_id()
+        if not cid:
             return
         guild = self.bot.get_guild(GUILD_ID)
-        channel = guild.get_channel(main_channel_id)
-        if not channel:
+        channel = guild.get_channel(cid)
+        pages = await get_pages()
+        if not channel or not pages:
             return
-        async for msg in channel.history(limit=30):
-            if msg.author == self.bot.user and msg.embeds and "Wiki-Menü" in (msg.embeds[0].title or ""):
+        # Lösche alte Bot-Nachrichten (nur von Bot, um Dopplungen zu vermeiden)
+        async for msg in channel.history(limit=20):
+            if msg.author == guild.me and msg.components:
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-        pages = _load_pages()
-        embed = Embed(
-            title="📚 Wiki-Menü",
-            description="Wähle eine Seite aus dem Dropdown-Menü, um den Inhalt zu sehen.",
-            color=0x1abc9c
+        embed = discord.Embed(
+            title="📚 Wiki-System",
+            description="Wähle unten eine Seite aus, um deren Inhalt zu sehen. (Antwort ist nur für dich sichtbar!)",
+            color=discord.Color.blurple()
         )
-        view = WikiSelectView(pages)
+        view = WikiMenuView(pages)
         await channel.send(embed=embed, view=view)
 
     @app_commands.command(
         name="wikimain",
-        description="Setzt den Hauptkanal & postet das Wiki-Menü (nur Admin)"
+        description="Setzt den Hauptkanal für das Wiki-Menü (nur Admins)."
     )
     @app_commands.guilds(GUILD_ID)
-    @has_permission_for("wikimain")
-    async def wikimain(self, interaction: discord.Interaction, channel: TextChannel):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
-            return
-        _save_main({"main_channel_id": channel.id})
-        await self.reload_menu()
-        await interaction.response.send_message("✅ Wiki-Menü im Channel gepostet!", ephemeral=True)
+    async def wikimain(self, interaction: Interaction, channel: discord.TextChannel):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        await set_main_channel_id(channel.id)
+        await self.reload_menu(channel.id)
+        await utils.send_success(interaction, f"Wiki-Menü wurde in {channel.mention} gepostet!")
 
     @app_commands.command(
         name="wiki_page",
-        description="Speichert diesen Channel als Wiki-Seite (nur Admin!)"
+        description="Speichert den aktuellen Channel als neue Wiki-Seite (nur Admins)."
     )
     @app_commands.guilds(GUILD_ID)
-    @has_permission_for("wiki_page")
-    async def wiki_page(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
-            return
+    async def wiki_page(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
         channel = interaction.channel
+        # Hole die letzten 30 Nachrichten, nimm den ersten nicht-Bot-Text
+        msgs = [m async for m in channel.history(limit=30)]
+        text_msg = next((m for m in msgs if not m.author.bot and m.content.strip()), None)
+        if not text_msg:
+            return await utils.send_error(interaction, "Kein Inhalt gefunden! (Letzte 30 Nachrichten prüfen.)")
+        content = text_msg.content.strip()
         title = channel.name
-        messages = [msg async for msg in channel.history(limit=30, oldest_first=True)
-                    if not msg.author.bot and msg.content.strip()]
-        if not messages:
-            await interaction.response.send_message("❌ Kein Inhalt gefunden.", ephemeral=True)
-            return
-        text = messages[0].content.strip()
-        pages = _load_pages()
-        backup = _load_backup()
-        pages[title] = text
-        backup[title] = text
-        _save_pages(pages)
-        _save_backup(backup)
+        pages = await get_pages()
+        backup = await get_backup()
+        pages[title] = content
+        backup[title] = content
+        await save_pages(pages)
+        await save_backup(backup)
+        # DM-Backup an den Admin
         try:
-            dm_embed = Embed(
-                title=f"📄 Wiki-Backup: {title}",
-                description=f"{text}",
-                color=0x1abc9c
+            await interaction.user.send(
+                f"Backup deiner Wiki-Seite '{title}':\n```{content[:1800]}```"
             )
-            await interaction.user.send(embed=dm_embed)
         except Exception:
             pass
-        try:
-            await channel.delete()
-        except Exception:
-            await interaction.response.send_message("⚠️ Seite gespeichert, aber Channel konnte nicht gelöscht werden.", ephemeral=True)
-            await self.reload_menu()
-            return
-        await interaction.response.send_message("✅ Seite gespeichert, Backup per DM gesendet und Channel gelöscht!", ephemeral=True)
         await self.reload_menu()
+        await utils.send_success(interaction, f"Wikiseite **{title}** gesichert!")
+        # Channel nach Sicherung löschen? -> Optional. Hier: Nicht automatisch!
 
     @app_commands.command(
         name="wiki_delete",
-        description="Löscht eine Wiki-Seite (Dropdown, nur Admin)"
+        description="Löscht eine Wiki-Seite (nur Admins, Dropdown-Auswahl)."
     )
     @app_commands.guilds(GUILD_ID)
-    @has_permission_for("wiki_delete")
-    async def wiki_delete(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
-            return
-        pages = _load_pages()
+    async def wiki_delete(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        pages = await get_pages()
         if not pages:
-            await interaction.response.send_message("ℹ️ Keine Seiten vorhanden.", ephemeral=True)
-            return
-
-        class DeleteView(discord.ui.View):
-            def __init__(self, cog):
-                super().__init__(timeout=60)
-                self.cog = cog
-                self.add_item(DeleteSelect(self.cog, list(pages.keys())[:25]))
-
-        class DeleteSelect(discord.ui.Select):
-            def __init__(self, cog, options):
-                super().__init__(
-                    placeholder="Seite wählen…",
-                    options=[discord.SelectOption(label=title) for title in options]
-                )
-                self.cog = cog
-
-            async def callback(self, interaction: discord.Interaction):
-                pages = _load_pages()
-                backup = _load_backup()
-                if self.values[0] in pages:
-                    del pages[self.values[0]]
-                    _save_pages(pages)
-                if self.values[0] in backup:
-                    del backup[self.values[0]]
-                    _save_backup(backup)
-                await interaction.response.send_message(f"✅ Seite **{self.values[0]}** gelöscht!", ephemeral=True)
-                await self.cog.reload_menu()
-
+            return await utils.send_error(interaction, "Keine Wiki-Seiten vorhanden.")
+        # Dropdown-Auswahl, dann Modal-Callback
+        view = WikiDeleteView(self)
         await interaction.response.send_message(
-            "Wähle eine Seite zum Löschen:",
-            view=DeleteView(self),
-            ephemeral=True
+            "Wähle die zu löschende Seite aus:", view=view, ephemeral=True
         )
 
     @app_commands.command(
         name="wiki_edit",
-        description="Bearbeite eine Wiki-Seite (Dropdown, Modal, nur Admin)"
+        description="Bearbeitet eine Wiki-Seite (nur Admins, Dropdown/Modal)."
     )
     @app_commands.guilds(GUILD_ID)
-    @has_permission_for("wiki_edit")
-    async def wiki_edit(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
-            return
-        pages = _load_pages()
+    async def wiki_edit(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        pages = await get_pages()
         if not pages:
-            await interaction.response.send_message("ℹ️ Keine Seiten vorhanden.", ephemeral=True)
-            return
-
-        class EditView(discord.ui.View):
-            def __init__(self, cog):
-                super().__init__(timeout=60)
-                self.cog = cog
-                self.add_item(EditSelect(self.cog, list(pages.keys())[:25]))
-
-        class EditSelect(discord.ui.Select):
-            def __init__(self, cog, options):
-                super().__init__(
-                    placeholder="Seite wählen…",
-                    options=[discord.SelectOption(label=title) for title in options]
-                )
-                self.cog = cog
-
-            async def callback(self, interaction: discord.Interaction):
-                title = self.values[0]
-                old = _load_pages().get(title, "")
-
-                class EditModal(discord.ui.Modal, title=f"Wiki editieren: {title}"):
-                    content = discord.ui.TextInput(label="Seiteninhalt", style=discord.TextStyle.paragraph, default=old, max_length=1800)
-
-                    async def on_submit(self, modal_interaction: discord.Interaction):
-                        pages = _load_pages()
-                        backup = _load_backup()
-                        pages[title] = self.content.value
-                        backup[title] = self.content.value
-                        _save_pages(pages)
-                        _save_backup(backup)
-                        await modal_interaction.response.send_message(f"✅ Seite **{title}** aktualisiert!", ephemeral=True)
-                        await self.cog.reload_menu()
-
-                await interaction.response.send_modal(EditModal())
-
+            return await utils.send_error(interaction, "Keine Wiki-Seiten vorhanden.")
+        view = WikiEditView(self)
         await interaction.response.send_message(
-            "Wähle eine Seite zum Bearbeiten:",
-            view=EditView(self),
-            ephemeral=True
+            "Wähle die zu bearbeitende Seite aus:", view=view, ephemeral=True
         )
 
     @app_commands.command(
         name="wiki_backup",
-        description="Stellt eine Seite aus Backup wieder her (nur Admin)"
+        description="Stellt eine Wiki-Seite aus dem Backup als neuen Channel wieder her (nur Admins)."
     )
     @app_commands.guilds(GUILD_ID)
-    @has_permission_for("wiki_backup")
-    async def wiki_backup(self, interaction: discord.Interaction):
-        if not is_admin(interaction.user):
-            await interaction.response.send_message("❌ Nur Admins!", ephemeral=True)
-            return
-        backup = _load_backup()
+    async def wiki_backup(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        backup = await get_backup()
         if not backup:
-            await interaction.response.send_message("ℹ️ Keine Backups vorhanden.", ephemeral=True)
-            return
-
-        class RestoreView(discord.ui.View):
-            def __init__(self, cog):
-                super().__init__(timeout=60)
-                self.cog = cog
-                self.add_item(RestoreSelect(self.cog, list(backup.keys())[:25]))
-
-        class RestoreSelect(discord.ui.Select):
-            def __init__(self, cog, options):
-                super().__init__(
-                    placeholder="Backup-Seite wählen…",
-                    options=[discord.SelectOption(label=title) for title in options]
-                )
-                self.cog = cog
-
-            async def callback(self, interaction: discord.Interaction):
-                title = self.values[0]
-                text = _load_backup().get(title, "")
-                category = interaction.channel.category
-                if not category:
-                    await interaction.response.send_message("❌ Muss in einer Kategorie ausgeführt werden.", ephemeral=True)
-                    return
-                guild = interaction.guild or self.cog.bot.get_guild(GUILD_ID)
-                cname = f"wiki-{title}".replace(" ", "-").lower()[:90]
-                try:
-                    new_ch = await guild.create_text_channel(cname, category=category)
-                except Exception:
-                    await interaction.response.send_message("❌ Channel konnte nicht erstellt werden.", ephemeral=True)
-                    return
-                chunks = [text[i:i+1800] for i in range(0, len(text), 1800)]
-                for chunk in chunks:
-                    await new_ch.send(chunk)
-                await interaction.response.send_message(f"✅ Wiki-Seite **{title}** wiederhergestellt: {new_ch.mention}", ephemeral=True)
-                await self.cog.reload_menu()
-
+            return await utils.send_error(interaction, "Keine Backups vorhanden.")
+        view = WikiBackupView(self)
         await interaction.response.send_message(
-            "Wähle eine Seite aus dem Backup zum Wiederherstellen:",
-            view=RestoreView(self),
-            ephemeral=True
+            "Wähle eine Backup-Seite aus:", view=view, ephemeral=True
         )
 
-# ==== User-Menü: Dropdown zum Nachschlagen der Seiten ====
+# ========== Delete/Edit/Backup Views ==========
 
-class WikiSelectView(discord.ui.View):
-    def __init__(self, pages):
-        super().__init__(timeout=None)
-        options = [
-            discord.SelectOption(label=title, description=text[:70].replace("\n", " "))
-            for title, text in list(pages.items())[:25]
-        ]
-        self.add_item(WikiSelect(options, pages))
+class WikiDeleteView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.pages = None
 
-class WikiSelect(discord.ui.Select):
-    def __init__(self, options, pages):
-        super().__init__(
-            placeholder="Wiki-Seite auswählen...",
-            options=options
-        )
-        self.pages = pages
+        # Dynamisch initialisieren
+        self.add_item(WikiDeleteDropdown(self))
 
-    async def callback(self, interaction: discord.Interaction):
+class WikiDeleteDropdown(discord.ui.Select):
+    def __init__(self, parent):
+        pages = discord.utils.get(self.cog.bot.cogs, name="WikiCog")
+        self.parent = parent
+        # Get pages for dropdown
+        self.page_data = None
+        # HACK: use sync function for dropdown init
+        self.options = []
+        self.init_options()
+        super().__init__(placeholder="Seite auswählen…", options=self.options, min_values=1, max_values=1)
+
+    def init_options(self):
+        # Kann im __init__ nicht awaiten, daher hier sync laden!
+        pages = utils.load_json_sync(WIKI_PAGES_PATH, {})
+        self.page_data = pages
+        for title in list(pages.keys())[:MAX_DROPDOWN]:
+            self.options.append(discord.SelectOption(label=title[:100], value=title))
+
+    async def callback(self, interaction: Interaction):
         title = self.values[0]
-        text = self.pages.get(title, "")
-        embed = Embed(
-            title=f"📄 Wiki: {title}",
-            description=text if text else "*Kein Inhalt gefunden*",
-            color=0x1abc9c
-        )
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        pages = await get_pages()
+        if title not in pages:
+            await utils.send_error(interaction, "Seite nicht gefunden.")
+            return
+        del pages[title]
+        await save_pages(pages)
+        await self.parent.cog.reload_menu()
+        await utils.send_success(interaction, f"Seite **{title}** gelöscht.")
 
+class WikiEditView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.add_item(WikiEditDropdown(self))
+
+class WikiEditDropdown(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent = parent
+        self.options = []
+        self.init_options()
+        super().__init__(placeholder="Seite auswählen…", options=self.options, min_values=1, max_values=1)
+
+    def init_options(self):
+        pages = utils.load_json_sync(WIKI_PAGES_PATH, {})
+        for title in list(pages.keys())[:MAX_DROPDOWN]:
+            self.options.append(discord.SelectOption(label=title[:100], value=title))
+
+    async def callback(self, interaction: Interaction):
+        title = self.values[0]
+        pages = await get_pages()
+        content = pages.get(title, "")
+        await interaction.response.send_modal(WikiEditModal(self.parent.cog, title, content))
+
+class WikiEditModal(discord.ui.Modal, title="Wiki-Seite bearbeiten"):
+    def __init__(self, cog, title, content):
+        super().__init__()
+        self.cog = cog
+        self.title_ = title
+        self.content_input = discord.ui.TextInput(
+            label=f"Inhalt von '{title}' bearbeiten",
+            style=discord.TextStyle.paragraph,
+            default=content,
+            required=True
+        )
+        self.add_item(self.content_input)
+
+    async def on_submit(self, interaction: Interaction):
+        pages = await get_pages()
+        pages[self.title_] = self.content_input.value
+        await save_pages(pages)
+        await self.cog.reload_menu()
+        await utils.send_success(interaction, f"Inhalt von **{self.title_}** aktualisiert.")
+
+class WikiBackupView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.add_item(WikiBackupDropdown(self))
+
+class WikiBackupDropdown(discord.ui.Select):
+    def __init__(self, parent):
+        self.parent = parent
+        self.options = []
+        self.init_options()
+        super().__init__(placeholder="Backup auswählen…", options=self.options, min_values=1, max_values=1)
+
+    def init_options(self):
+        backup = utils.load_json_sync(WIKI_BACKUP_PATH, {})
+        for title in list(backup.keys())[:MAX_DROPDOWN]:
+            self.options.append(discord.SelectOption(label=title[:100], value=title))
+
+    async def callback(self, interaction: Interaction):
+        title = self.values[0]
+        backup = await get_backup()
+        text = backup.get(title, "")
+        if not text:
+            await utils.send_error(interaction, "Kein Text im Backup gefunden.")
+            return
+        # Neuen Channel in aktueller Kategorie anlegen
+        category = interaction.channel.category
+        guild = interaction.guild
+        if not category:
+            await utils.send_error(interaction, "Bitte Command in einer Kategorie verwenden!")
+            return
+        try:
+            new_channel = await guild.create_text_channel(name=title[:90], category=category)
+            for chunk in chunk_text(text):
+                await new_channel.send(chunk)
+            await utils.send_success(interaction, f"Backup **{title}** als Channel wiederhergestellt: {new_channel.mention}")
+        except Exception:
+            await utils.send_error(interaction, "Konnte Channel nicht erstellen.")
+
+# ========== Setup ==========
 async def setup(bot):
     await bot.add_cog(WikiCog(bot))

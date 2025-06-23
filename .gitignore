@@ -1,2 +1,23 @@
-/persistent_data/*
-/railway_data_backup/*
+# Keine Secrets ins Repo!
+.env
+
+# Python-Cache/Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# System-Dateien/Editor-Kram
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Persistente Daten/Backups
+persistent_data/
+railway_data_backup/
+
+# Logdateien
+*.log
+
+# (Optional) Lokale Notebooks/Tests
+*.ipynb
