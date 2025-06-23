@@ -4,7 +4,8 @@ from discord.ext import commands
 from discord import app_commands, Interaction, TextChannel, Embed
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
-from discord import Interaction
+from discord.interactions import Interaction
+
 
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))

@@ -4,6 +4,8 @@ from discord.ext import commands
 from discord import app_commands, TextChannel, Embed
 from utils import is_admin, load_json, save_json
 from permissions import has_permission_for
+from discord.interactions import Interaction
+
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 PAGES_JSON = "persistent_data/wiki_pages.json"

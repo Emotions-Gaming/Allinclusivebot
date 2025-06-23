@@ -8,6 +8,8 @@ import traceback
 from datetime import datetime
 from dotenv import load_dotenv
 from discord import Interaction
+from discord.interactions import Interaction
+
 
 
 from permissions import has_permission_for

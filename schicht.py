@@ -4,6 +4,7 @@ from discord.ext import commands
 from discord import app_commands, TextChannel, Role, Embed, Member
 from utils import is_admin, load_json, save_json, mention_roles
 from permissions import has_permission_for
+from discord.interactions import Interaction
 
 GUILD_ID = int(os.environ.get("GUILD_ID"))
 SCHICHT_CONFIG = "persistent_data/schicht_config.json"

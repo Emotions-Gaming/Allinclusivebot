@@ -3,7 +3,8 @@ import json
 import logging
 from typing import List, Any, Optional
 from discord import Member, Guild, Role
-from discord import Interaction
+from discord.interactions import Interaction
+
 
 
 # =========================
