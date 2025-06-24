@@ -32,15 +32,6 @@ class AlarmMainPanelView(discord.ui.View):
             return await utils.send_permission_denied(interaction)
         await interaction.response.send_modal(AlarmCreateModal(cog))
 
-    @discord.ui.button(label="Befehl kopieren", style=discord.ButtonStyle.gray, emoji="📋")
-    async def copy_cmd(self, interaction: Interaction, button: discord.ui.Button):
-        await utils.send_ephemeral(
-            interaction,
-            text="Kopiere den Befehl unten:\n```/alarmzuteilung [user]```",
-            emoji="📋",
-            color=discord.Color.blurple()
-        )
-
 class AlarmCreateModal(discord.ui.Modal, title="Neue Schichtanfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
@@ -95,22 +86,32 @@ class ClaimView(discord.ui.View):
         log_channel = interaction.guild.get_channel(cfg.get("log_channel_id", 0)) if cfg.get("log_channel_id") else None
         info_text = (
             f"**Danke fürs Übernehmen der Schicht am {zeitinfo}!**\n"
-            f"Du hast folgende Streamer: **{streamerinfo}**"
+            f"Du hast folgende Streamer: **{streamerinfo}**\n\n"
+            "Bitte sei **15 Minuten vor Schichtbeginn im General-Voice-Channel** anwesend!"
         )
+        # DM senden
         try:
             await claimer.send(info_text)
             dm_ok = True
         except Exception:
             dm_ok = False
-        log_msg = (
-            f"✅ {claimer.mention} hat die Schicht am `{zeitinfo}` für **{streamerinfo}** angenommen und wurde somit eingeteilt."
-        )
+
+        # Log ins Channel als GELBES EMBED
         if log_channel:
-            await log_channel.send(log_msg)
+            embed = discord.Embed(
+                description=(
+                    f"**Schichtübernahme:** {claimer.mention} hat die Schicht am `{zeitinfo}` für **{streamerinfo}** übernommen."
+                ),
+                color=discord.Color.yellow()
+            )
+            await log_channel.send(embed=embed)
             if not dm_ok:
-                await log_channel.send(
-                    f"⚠️ {claimer.mention} konnte nicht angeschrieben werden (DM blockiert oder nicht erlaubt). Bitte selbstständig melden!"
+                embed_dm = discord.Embed(
+                    description=f"⚠️ {claimer.mention} konnte nicht per DM benachrichtigt werden (DM blockiert).",
+                    color=discord.Color.red()
                 )
+                await log_channel.send(embed=embed_dm)
+
         await interaction.response.send_message("Schicht übernommen!", ephemeral=True)
         try:
             await interaction.message.delete()
@@ -145,22 +146,26 @@ class AlarmZuteilModal(discord.ui.Modal, title="User direkt zu Schicht zuweisen"
         dm_text = (
             f"**Du wurdest zu der Schicht am {zeitinfo} zugeteilt!**\n"
             f"Du betreust folgende Streamer: **{streamerinfo}**\n"
-            "Bitte sei 15 Minuten vor Schichtbeginn im General anwesend!"
+            "Bitte sei **15 Minuten vor Schichtbeginn im General-Voice-Channel** anwesend!"
         )
         try:
             await target.send(dm_text)
             dm_ok = True
         except Exception:
             dm_ok = False
-        log_msg = (
-            f"📝 {lead.mention} hat {target.mention} zur Schicht am `{zeitinfo}` für **{streamerinfo}** eingeteilt."
-        )
+        # Log ins Channel als GRÜNES EMBED
         if log_channel:
-            await log_channel.send(log_msg)
+            embed = discord.Embed(
+                description=f"**Schichteinteilung:** {lead.mention} hat {target.mention} zur Schicht am `{zeitinfo}` für **{streamerinfo}** eingeteilt.",
+                color=discord.Color.green()
+            )
+            await log_channel.send(embed=embed)
             if not dm_ok:
-                await log_channel.send(
-                    f"⚠️ {target.mention} konnte nicht angeschrieben werden (DM blockiert oder nicht erlaubt). Bitte selbstständig melden!"
+                embed_dm = discord.Embed(
+                    description=f"⚠️ {target.mention} konnte nicht per DM benachrichtigt werden (DM blockiert).",
+                    color=discord.Color.red()
                 )
+                await log_channel.send(embed=embed_dm)
         await utils.send_success(interaction, f"{target.mention} wurde zugeteilt.")
 
 class AlarmCog(commands.Cog):
@@ -168,6 +173,7 @@ class AlarmCog(commands.Cog):
         self.bot = bot
 
     # ========== Helper ==========
+
     async def get_config(self):
         return await utils.load_json(ALARM_CONFIG_PATH, {})
 
@@ -197,13 +203,13 @@ class AlarmCog(commands.Cog):
     async def make_panel_embed(self, guild):
         cfg = await self.get_config()
         lead = get_lead_mention(guild, cfg.get("lead_id"))
-        streamercopy = "/alarmzuteilung [user]"
+        streamercopy = "/alarmzuteilung"
         embed = discord.Embed(
             title="🚨 Alarm-Schichtsystem – Hauptpanel",
             description=(
                 f"**Aktueller AlarmLead:** {lead}\n\n"
                 "➔ Klicke unten auf „Schichtanfrage erstellen“ um eine neue Schicht anzulegen.\n"
-                "➔ Oder benutze `/alarmzuteilung [user]` für eine direkte Zuteilung (siehe Copy-Button).\n"
+                "➔ Oder benutze `/alarmzuteilung [user]` für eine direkte Zuteilung.\n"
                 "\n**Ablauf Claim:**\n"
                 "1. Claim-Button klicken\n"
                 "2. Claim wird geloggt, Schichtanfrage verschwindet\n"
@@ -212,7 +218,12 @@ class AlarmCog(commands.Cog):
             color=discord.Color.blurple(),
             timestamp=datetime.now()
         )
-        embed.add_field(name="Schnellbefehl kopieren:", value=f"`{streamercopy}`", inline=False)
+        # Der "Kopiere diesen Befehl"-Block, wie gewünscht, unten als Field:
+        embed.add_field(
+            name="Kopiere diesen Befehl:",
+            value="```/alarmzuteilung```",
+            inline=False
+        )
         view = AlarmMainPanelView(self)
         return embed, view
 
@@ -342,7 +353,6 @@ class AlarmCog(commands.Cog):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
         await interaction.response.send_modal(AlarmZuteilModal(self, user))
-
 
 # ========== Setup ==========
 async def setup(bot):
