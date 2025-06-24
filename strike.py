@@ -222,7 +222,7 @@ class StrikeCog(commands.Cog):
         )
         embed.add_field(
             name="Kopiere diesen Befehl:",
-            value="```/schichtuebergabe```",
+            value="```/strikegive```",
             inline=False
         )
         await interaction.channel.send(embed=embed)
@@ -384,7 +384,7 @@ class StrikeCog(commands.Cog):
             )
             embed.add_field(
                 name="Kopiere diesen Befehl:",
-                value="```/schichtuebergabe```",
+                value="```/strikegive```",
                 inline=False
             )
             await channel.send(embed=embed)
