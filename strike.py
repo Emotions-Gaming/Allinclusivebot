@@ -3,6 +3,7 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 import os
 import utils
+import asyncio
 from datetime import datetime
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
@@ -22,7 +23,16 @@ class StrikeModal(discord.ui.Modal, title="Strike vergeben"):
     async def on_submit(self, interaction: Interaction):
         await self._callback(interaction, self.grund.value, self.bild.value)
 
-# ==== Button für Details pro User ==== 
+# ==== Buttons/Views für Strike-Liste ====
+class StrikeListView(discord.ui.View):
+    def __init__(self, strikes: dict, cog):
+        super().__init__(timeout=None)
+        self.strikes = strikes
+        self.cog = cog
+        for uid, entries in strikes.items():
+            user_id = int(uid)
+            self.add_item(StrikeDetailButton(user_id, entries))
+
 class StrikeDetailButton(discord.ui.Button):
     def __init__(self, user_id, entries):
         label = f"Details zu {len(entries)} Strike{'s' if len(entries) != 1 else ''}"
@@ -40,10 +50,10 @@ class StrikeDetailButton(discord.ui.Button):
                 f"**{i+1}.** {s['grund']}\n(Bild: {s['bild'] or '-'})\nZeit: {s['zeit']}"
                 for i, s in enumerate(strikes)
             ])
-            text = f"**Strikes für {user.mention if user else self.user_id}:**\n\n{desc}"
+            text = f"**Strikes für {user.mention if user else f'<@{self.user_id}>'}:**\n\n{desc}"
         await utils.send_ephemeral(interaction, text=text, emoji="⚠️", color=discord.Color.orange())
 
-# ==== Button für Admin-Log Details ==== 
+# ==== Button für Admin-Log Details ====
 class StrikeLogDetailButton(discord.ui.Button):
     def __init__(self, idx, entry):
         label = f"Details"
@@ -60,24 +70,6 @@ class StrikeLogDetailButton(discord.ui.Button):
             f"**Zeit:** {e['zeit']}"
         )
         await utils.send_ephemeral(interaction, text=text, emoji="🕵️", color=discord.Color.purple())
-
-# ==== Die View für die Strikeliste (mit sauberer Optik/Abtrennung) ==== 
-class StrikeListView(discord.ui.View):
-    def __init__(self, strikes: dict, guild):
-        super().__init__(timeout=None)
-        self.strikes = strikes
-        self.guild = guild
-        # Reihenfolge: für jede Person eine Zeile + Button + Trenner (außer letzte)
-        items = list(strikes.items())
-        for idx, (uid, entries) in enumerate(items):
-            user = guild.get_member(int(uid))
-            name = f"{user.mention if user else uid} = Strikes **{len(entries)}**"
-            # Label als statisches Dummy-Element (kein Button, sondern Disabled)
-            self.add_item(discord.ui.Button(label=name, style=discord.ButtonStyle.gray, disabled=True))
-            self.add_item(StrikeDetailButton(int(uid), entries))
-            # Trennlinie (außer beim letzten Eintrag)
-            if idx < len(items) - 1:
-                self.add_item(discord.ui.Button(label="―" * 28, style=discord.ButtonStyle.gray, disabled=True))
 
 class StrikeCog(commands.Cog):
     def __init__(self, bot):
@@ -132,13 +124,24 @@ class StrikeCog(commands.Cog):
             await ch.send(embed=embed)
             return
 
-        # Strikes dict an View übergeben (Name + Button, sauber getrennt)
-        view = StrikeListView(data, guild)
         embed = discord.Embed(
             title="🛡️ Strikeliste",
-            description="",  # Alles in der View, Embed bleibt clean
             color=discord.Color.red()
         )
+        view = discord.ui.View(timeout=None)
+        for uid, strikes in data.items():
+            user = guild.get_member(int(uid))
+            if user:
+                name = f"{user.mention} ({user.display_name})"
+            else:
+                name = f"<@{uid}> (Unbekannt)"
+            count = len(strikes)
+            embed.add_field(
+                name="🧑‍⚖️ " + name,
+                value=f"**Strikes:** {count}",
+                inline=False
+            )
+            view.add_item(StrikeDetailButton(int(uid), strikes))
         await ch.send(embed=embed, view=view)
 
     async def add_strike(self, user: discord.Member, grund, bild, by_user=None):
@@ -178,36 +181,48 @@ class StrikeCog(commands.Cog):
                 await user.add_roles(role, reason="3 Strikes erreicht (Auto-Role)")
 
     # ========== Strike Log Handling ==========
-    async def save_strike_log(self, guild, by_user, user, grund, bild):
-        # Log-Channel holen
+    async def save_strike_log(self, guild, by_user, user, grund, bild, action="add", count=None):
+        """
+        action: "add", "remove", "reset"
+        """
         log_channel = await self.get_strike_log_channel(guild)
         if not log_channel:
             return
-        # Wie gewünscht: Ein Embed pro Strike, Button direkt drunter
-        data = await self.get_strike_data()
-        anz = len(data.get(str(user.id), []))
-        log_entry = {
-            "from_user": by_user.mention if by_user else "-",
-            "to_user": user.mention if user else "-",
-            "grund": grund,
-            "bild": bild,
-            "zeit": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "anzahl": anz
+
+        actions = {
+            "add": "📋 Strike vergeben",
+            "remove": "🗑️ Strike entfernt",
+            "reset": "🧹 Strikes zurückgesetzt"
         }
-        view = discord.ui.View()
-        view.add_item(StrikeLogDetailButton(0, log_entry))
+        if action == "add":
+            count_text = f"(Jetzt: **{count}** Strikes)" if count is not None else ""
+            desc = (
+                f"{by_user.mention if by_user else '-'} hat {user.mention if user else '-'} einen Strike vergeben! {count_text}\n"
+                f"**Grund:** {grund}\n"
+                f"**Bild:** {bild or '-'}\n"
+                f"**Zeit:** {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+        elif action == "remove":
+            desc = (
+                f"{by_user.mention if by_user else '-'} hat bei {user.mention if user else '-'} einen **Strike entfernt**!\n"
+                f"**Zeit:** {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+        elif action == "reset":
+            desc = (
+                f"{by_user.mention if by_user else '-'} hat bei {user.mention if user else '-'} **alle Strikes zurückgesetzt**!\n"
+                f"**Zeit:** {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+            )
+        else:
+            desc = "Strike-Aktion ausgeführt."
+
         embed = discord.Embed(
-            title="📋 Strike vergeben",
-            description=(
-                f"{by_user.mention if by_user else '-'} hat {user.mention if user else '-'} "
-                f"den {anz}. Strike gegeben"
-            ),
-            color=discord.Color.orange()
+            title=actions.get(action, "Strike Log"),
+            description=desc,
+            color=discord.Color.orange() if action == "add" else discord.Color.blue()
         )
-        await log_channel.send(embed=embed, view=view)
+        await log_channel.send(embed=embed)
 
     # ==== Slash Commands ====
-
     @app_commands.command(
         name="strikemaininfo",
         description="Zeigt die Info & Anleitung für das Strike-System (nur Admins)."
@@ -288,7 +303,7 @@ class StrikeCog(commands.Cog):
                 pass
             # Log/Übersicht updaten
             await self.post_strike_log(interaction.guild)
-            await self.save_strike_log(interaction.guild, interaction.user, user, grund, bild)
+            await self.save_strike_log(interaction.guild, interaction.user, user, grund, bild, action="add", count=anz)
 
         await interaction.response.send_modal(StrikeModal(after_modal))
 
@@ -333,6 +348,7 @@ class StrikeCog(commands.Cog):
             return await utils.send_permission_denied(interaction)
         await self.remove_last_strike(user)
         await utils.send_success(interaction, f"Letzter Strike für {user.mention} entfernt.")
+        await self.save_strike_log(interaction.guild, interaction.user, user, grund=None, bild=None, action="remove")
         await self.post_strike_log(interaction.guild)
 
     @app_commands.command(
@@ -345,6 +361,7 @@ class StrikeCog(commands.Cog):
             return await utils.send_permission_denied(interaction)
         await self.delete_all_strikes(user)
         await utils.send_success(interaction, f"Alle Strikes für {user.mention} entfernt.")
+        await self.save_strike_log(interaction.guild, interaction.user, user, grund=None, bild=None, action="reset")
         await self.post_strike_log(interaction.guild)
 
     @app_commands.command(
