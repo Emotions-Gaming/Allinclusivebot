@@ -17,15 +17,18 @@ class SchichtCog(commands.Cog):
 
     async def get_config(self):
         cfg = await utils.load_json(SCHICHT_CONFIG_PATH, {})
-        # Sicherstellen, dass alle Keys da sind!
+        # Migration/Backwards-Compatibility
         if "roles" not in cfg:
             cfg["roles"] = []
         if "voice_channel_id" not in cfg:
             cfg["voice_channel_id"] = None
         if "log_channel_id" not in cfg:
             cfg["log_channel_id"] = None
-        if "schicht_group" not in cfg:
-            cfg["schicht_group"] = []
+        if "schicht_group_users" not in cfg:
+            # Migriere alte User-Liste
+            cfg["schicht_group_users"] = cfg.get("schicht_group", [])
+        if "schicht_group_roles" not in cfg:
+            cfg["schicht_group_roles"] = []
         return cfg
 
     async def save_config(self, config):
@@ -35,9 +38,14 @@ class SchichtCog(commands.Cog):
         cfg = await self.get_config()
         return utils.is_admin(member) or utils.has_any_role(member, cfg.get("roles", []))
 
-    async def is_in_group(self, user_id: int):
+    async def is_in_group(self, member: discord.Member):
         cfg = await self.get_config()
-        return user_id in cfg.get("schicht_group", [])
+        # Check User explizit oder Mitglied mind. einer Gruppenrolle
+        if member.id in cfg.get("schicht_group_users", []):
+            return True
+        if utils.has_any_role(member, cfg.get("schicht_group_roles", [])):
+            return True
+        return False
 
     async def get_voice_channel(self, guild):
         cfg = await self.get_config()
@@ -85,7 +93,7 @@ class SchichtCog(commands.Cog):
         )
         embed.add_field(
             name="Kopiere diesen Befehl:",
-            value="```/schichtuebergabe (nutzer)```",
+            value="```/schichtuebergabe```",
             inline=False
         )
         await interaction.channel.send(embed=embed)
@@ -105,9 +113,9 @@ class SchichtCog(commands.Cog):
         if not await self.is_allowed(initiator):
             return await utils.send_permission_denied(interaction)
 
-        # Nur Schichtgruppenmitglieder auswählbar
-        if not await self.is_in_group(user.id):
-            return await utils.send_error(interaction, "Dieser Nutzer ist nicht in der Schichtgruppe und kann nicht ausgewählt werden.")
+        # Nur Schichtgruppenmitglieder auswählbar (jetzt User+Rollen)
+        if not await self.is_in_group(user):
+            return await utils.send_error(interaction, "Dieser Nutzer ist nicht in der Schichtgruppe (weder explizit noch durch Rolle).")
 
         # Voice-Check: Initiator
         if not isinstance(initiator, discord.Member) or not initiator.voice or not initiator.voice.channel:
@@ -223,14 +231,16 @@ class SchichtCog(commands.Cog):
         cfg = await self.get_config()
         guild = interaction.guild
         rollen = utils.pretty_role_list(guild, cfg.get("roles", []))
-        group = ", ".join(f"<@{uid}>" for uid in cfg.get("schicht_group", [])) or "*Keine*"
+        group_users = ", ".join(f"<@{uid}>" for uid in cfg.get("schicht_group_users", [])) or "*Keine*"
+        group_roles = utils.pretty_role_list(guild, cfg.get("schicht_group_roles", []))
         voice = guild.get_channel(cfg.get("voice_channel_id", 0))
         log = guild.get_channel(cfg.get("log_channel_id", 0))
         desc = (
             f"**Schichtrollen:** {rollen}\n"
             f"**VoiceChannel:** {voice.mention if voice else '*nicht gesetzt*'}\n"
             f"**LogChannel:** {log.mention if log else '*nicht gesetzt*'}\n"
-            f"**Schichtgruppe:** {group}"
+            f"**Schichtgruppen-User:** {group_users}\n"
+            f"**Schichtgruppen-Rollen:** {group_roles if group_roles else '*Keine*'}"
         )
         await utils.send_ephemeral(
             interaction,
@@ -239,37 +249,54 @@ class SchichtCog(commands.Cog):
             color=discord.Color.teal()
         )
 
+    # ------------- NEU: Rollen ODER User zur Schichtgruppe hinzufügen -------------
     @app_commands.command(
         name="schichtgroup",
-        description="Fügt einen Nutzer zur Schichtgruppe hinzu (nur Admin)."
+        description="Fügt einen Nutzer ODER eine Rolle zur Schichtgruppe hinzu (nur Admin)."
     )
     @app_commands.guilds(MY_GUILD)
-    async def schichtgroup(self, interaction: Interaction, user: discord.Member):
+    async def schichtgroup(self, interaction: Interaction, target: discord.Member | discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await self.get_config()
-        if user.id not in cfg.get("schicht_group", []):
-            cfg["schicht_group"].append(user.id)
-            await self.save_config(cfg)
-            await utils.send_success(interaction, f"{user.mention} ist jetzt Mitglied der Schichtgruppe.")
-        else:
-            await utils.send_error(interaction, f"{user.mention} ist bereits Mitglied der Schichtgruppe.")
+        if isinstance(target, discord.Member):
+            if target.id not in cfg.get("schicht_group_users", []):
+                cfg["schicht_group_users"].append(target.id)
+                await self.save_config(cfg)
+                await utils.send_success(interaction, f"{target.mention} ist jetzt Mitglied der Schichtgruppe.")
+            else:
+                await utils.send_error(interaction, f"{target.mention} ist bereits Mitglied der Schichtgruppe.")
+        elif isinstance(target, discord.Role):
+            if target.id not in cfg.get("schicht_group_roles", []):
+                cfg["schicht_group_roles"].append(target.id)
+                await self.save_config(cfg)
+                await utils.send_success(interaction, f"Rolle {target.mention} ist jetzt Schichtgruppe (alle mit der Rolle).")
+            else:
+                await utils.send_error(interaction, f"Rolle {target.mention} ist bereits Schichtgruppe.")
 
     @app_commands.command(
         name="schichtgroupremove",
-        description="Entfernt einen Nutzer aus der Schichtgruppe (nur Admin)."
+        description="Entfernt einen Nutzer ODER eine Rolle aus der Schichtgruppe (nur Admin)."
     )
     @app_commands.guilds(MY_GUILD)
-    async def schichtgroupremove(self, interaction: Interaction, user: discord.Member):
+    async def schichtgroupremove(self, interaction: Interaction, target: discord.Member | discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await self.get_config()
-        if user.id in cfg.get("schicht_group", []):
-            cfg["schicht_group"].remove(user.id)
-            await self.save_config(cfg)
-            await utils.send_success(interaction, f"{user.mention} wurde aus der Schichtgruppe entfernt.")
-        else:
-            await utils.send_error(interaction, f"{user.mention} ist nicht in der Schichtgruppe.")
+        if isinstance(target, discord.Member):
+            if target.id in cfg.get("schicht_group_users", []):
+                cfg["schicht_group_users"].remove(target.id)
+                await self.save_config(cfg)
+                await utils.send_success(interaction, f"{target.mention} wurde aus der Schichtgruppe entfernt.")
+            else:
+                await utils.send_error(interaction, f"{target.mention} ist nicht in der Schichtgruppe.")
+        elif isinstance(target, discord.Role):
+            if target.id in cfg.get("schicht_group_roles", []):
+                cfg["schicht_group_roles"].remove(target.id)
+                await self.save_config(cfg)
+                await utils.send_success(interaction, f"Rolle {target.mention} wurde aus der Schichtgruppe entfernt.")
+            else:
+                await utils.send_error(interaction, f"Rolle {target.mention} ist nicht in der Schichtgruppe.")
 
     # ===== Menu-Refresh für SetupBot =====
     async def reload_menu(self, channel_id):
@@ -290,7 +317,7 @@ class SchichtCog(commands.Cog):
             )
             embed.add_field(
                 name="Kopiere diesen Befehl:",
-                value="```/schichtuebergabe (nutzer)```",
+                value="```/schichtuebergabe```",
                 inline=False
             )
             await channel.send(embed=embed)
