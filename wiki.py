@@ -1,6 +1,4 @@
-﻿# wiki.py
-
-import discord
+﻿import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -65,7 +63,11 @@ class WikiDropdown(discord.ui.Select):
                 description=chunk,
                 color=discord.Color.blurple()
             )
-            await utils.send_ephemeral(interaction, text=" ", embed=embed)
+            if idx == 0:
+                await utils.send_ephemeral(interaction, text=" ", embed=embed)
+            else:
+                # Ab dem 2. Chunk followup, direkt ohne utils.py
+                await interaction.followup.send(embed=embed, ephemeral=True)
 
 # ========== Slash Commands ==========
 
@@ -73,6 +75,7 @@ class WikiCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # Helper to (re)post the Wiki Menu
     async def reload_menu(self, channel_id=None):
         cid = channel_id or await get_main_channel_id()
         if not cid:
@@ -82,6 +85,7 @@ class WikiCog(commands.Cog):
         pages = await get_pages()
         if not channel or not pages:
             return
+        # Lösche alte Bot-Nachrichten (nur von Bot, um Dopplungen zu vermeiden)
         async for msg in channel.history(limit=20):
             if msg.author == guild.me and msg.components:
                 try:
@@ -117,6 +121,7 @@ class WikiCog(commands.Cog):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         channel = interaction.channel
+        # Hole die letzten 30 Nachrichten, nimm den ersten nicht-Bot-Text
         msgs = [m async for m in channel.history(limit=30)]
         text_msg = next((m for m in msgs if not m.author.bot and m.content.strip()), None)
         if not text_msg:
@@ -129,6 +134,7 @@ class WikiCog(commands.Cog):
         backup[title] = content
         await save_pages(pages)
         await save_backup(backup)
+        # DM-Backup an den Admin
         try:
             await interaction.user.send(
                 f"Backup deiner Wiki-Seite '{title}':\n```{content[:1800]}```"
@@ -149,11 +155,8 @@ class WikiCog(commands.Cog):
         pages = await get_pages()
         if not pages:
             return await utils.send_error(interaction, "Keine Wiki-Seiten vorhanden.")
-        options = [
-            discord.SelectOption(label=title[:100], value=title)
-            for title in list(pages.keys())[:MAX_DROPDOWN]
-        ]
-        view = WikiDeleteView(self, options)
+        # Dropdown-Auswahl, dann Modal-Callback
+        view = WikiDeleteView(self)
         await interaction.response.send_message(
             "Wähle die zu löschende Seite aus:", view=view, ephemeral=True
         )
@@ -169,11 +172,7 @@ class WikiCog(commands.Cog):
         pages = await get_pages()
         if not pages:
             return await utils.send_error(interaction, "Keine Wiki-Seiten vorhanden.")
-        options = [
-            discord.SelectOption(label=title[:100], value=title)
-            for title in list(pages.keys())[:MAX_DROPDOWN]
-        ]
-        view = WikiEditView(self, options)
+        view = WikiEditView(self)
         await interaction.response.send_message(
             "Wähle die zu bearbeitende Seite aus:", view=view, ephemeral=True
         )
@@ -189,11 +188,7 @@ class WikiCog(commands.Cog):
         backup = await get_backup()
         if not backup:
             return await utils.send_error(interaction, "Keine Backups vorhanden.")
-        options = [
-            discord.SelectOption(label=title[:100], value=title)
-            for title in list(backup.keys())[:MAX_DROPDOWN]
-        ]
-        view = WikiBackupView(self, options)
+        view = WikiBackupView(self)
         await interaction.response.send_message(
             "Wähle eine Backup-Seite aus:", view=view, ephemeral=True
         )
@@ -201,14 +196,25 @@ class WikiCog(commands.Cog):
 # ========== Delete/Edit/Backup Views ==========
 
 class WikiDeleteView(discord.ui.View):
-    def __init__(self, cog, options):
+    def __init__(self, cog):
         super().__init__(timeout=60)
-        self.add_item(WikiDeleteDropdown(cog, options))
+        self.cog = cog
+        self.pages = None
+        self.add_item(WikiDeleteDropdown(self))
 
 class WikiDeleteDropdown(discord.ui.Select):
-    def __init__(self, cog, options):
-        super().__init__(placeholder="Seite auswählen…", options=options, min_values=1, max_values=1)
-        self.cog = cog
+    def __init__(self, parent):
+        self.parent = parent
+        self.page_data = None
+        self.options = []
+        self.init_options()
+        super().__init__(placeholder="Seite auswählen…", options=self.options, min_values=1, max_values=1)
+
+    def init_options(self):
+        pages = utils.load_json_sync(WIKI_PAGES_PATH, {})
+        self.page_data = pages
+        for title in list(pages.keys())[:MAX_DROPDOWN]:
+            self.options.append(discord.SelectOption(label=title[:100], value=title))
 
     async def callback(self, interaction: Interaction):
         title = self.values[0]
@@ -218,24 +224,32 @@ class WikiDeleteDropdown(discord.ui.Select):
             return
         del pages[title]
         await save_pages(pages)
-        await self.cog.reload_menu()
+        await self.parent.cog.reload_menu()
         await utils.send_success(interaction, f"Seite **{title}** gelöscht.")
 
 class WikiEditView(discord.ui.View):
-    def __init__(self, cog, options):
+    def __init__(self, cog):
         super().__init__(timeout=60)
-        self.add_item(WikiEditDropdown(cog, options))
+        self.cog = cog
+        self.add_item(WikiEditDropdown(self))
 
 class WikiEditDropdown(discord.ui.Select):
-    def __init__(self, cog, options):
-        super().__init__(placeholder="Seite auswählen…", options=options, min_values=1, max_values=1)
-        self.cog = cog
+    def __init__(self, parent):
+        self.parent = parent
+        self.options = []
+        self.init_options()
+        super().__init__(placeholder="Seite auswählen…", options=self.options, min_values=1, max_values=1)
+
+    def init_options(self):
+        pages = utils.load_json_sync(WIKI_PAGES_PATH, {})
+        for title in list(pages.keys())[:MAX_DROPDOWN]:
+            self.options.append(discord.SelectOption(label=title[:100], value=title))
 
     async def callback(self, interaction: Interaction):
         title = self.values[0]
         pages = await get_pages()
         content = pages.get(title, "")
-        await interaction.response.send_modal(WikiEditModal(self.cog, title, content))
+        await interaction.response.send_modal(WikiEditModal(self.parent.cog, title, content))
 
 class WikiEditModal(discord.ui.Modal, title="Wiki-Seite bearbeiten"):
     def __init__(self, cog, title, content):
@@ -258,14 +272,22 @@ class WikiEditModal(discord.ui.Modal, title="Wiki-Seite bearbeiten"):
         await utils.send_success(interaction, f"Inhalt von **{self.title_}** aktualisiert.")
 
 class WikiBackupView(discord.ui.View):
-    def __init__(self, cog, options):
+    def __init__(self, cog):
         super().__init__(timeout=60)
-        self.add_item(WikiBackupDropdown(cog, options))
+        self.cog = cog
+        self.add_item(WikiBackupDropdown(self))
 
 class WikiBackupDropdown(discord.ui.Select):
-    def __init__(self, cog, options):
-        super().__init__(placeholder="Backup auswählen…", options=options, min_values=1, max_values=1)
-        self.cog = cog
+    def __init__(self, parent):
+        self.parent = parent
+        self.options = []
+        self.init_options()
+        super().__init__(placeholder="Backup auswählen…", options=self.options, min_values=1, max_values=1)
+
+    def init_options(self):
+        backup = utils.load_json_sync(WIKI_BACKUP_PATH, {})
+        for title in list(backup.keys())[:MAX_DROPDOWN]:
+            self.options.append(discord.SelectOption(label=title[:100], value=title))
 
     async def callback(self, interaction: Interaction):
         title = self.values[0]
@@ -274,6 +296,7 @@ class WikiBackupDropdown(discord.ui.Select):
         if not text:
             await utils.send_error(interaction, "Kein Text im Backup gefunden.")
             return
+        # Neuen Channel in aktueller Kategorie anlegen
         category = interaction.channel.category
         guild = interaction.guild
         if not category:
@@ -288,6 +311,5 @@ class WikiBackupDropdown(discord.ui.Select):
             await utils.send_error(interaction, "Konnte Channel nicht erstellen.")
 
 # ========== Setup ==========
-
 async def setup(bot):
     await bot.add_cog(WikiCog(bot))
