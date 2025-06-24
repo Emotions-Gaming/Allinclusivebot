@@ -138,6 +138,11 @@ class StrikeCog(commands.Cog):
             ),
             color=discord.Color.red()
         )
+        embed.add_field(
+            name="Kopiere diesen Befehl:",
+            value="```/schichtuebergabe ```",
+            inline=False
+        )
         await interaction.channel.send(embed=embed)
         await utils.send_success(interaction, "Strike-System-Anleitung gepostet.")
 
@@ -294,7 +299,7 @@ class StrikeCog(commands.Cog):
             )
             embed.add_field(
                 name="Kopiere diesen Befehl:",
-                value="```/schichtuebergabe ```",
+                value="```/schichtuebergabe (nutzer)```",
                 inline=False
             )
             await channel.send(embed=embed)
