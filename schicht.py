@@ -17,7 +17,6 @@ class SchichtCog(commands.Cog):
 
     async def get_config(self):
         cfg = await utils.load_json(SCHICHT_CONFIG_PATH, {})
-        # Migration/Backwards-Compatibility
         if "roles" not in cfg:
             cfg["roles"] = []
         if "voice_channel_id" not in cfg:
@@ -25,7 +24,6 @@ class SchichtCog(commands.Cog):
         if "log_channel_id" not in cfg:
             cfg["log_channel_id"] = None
         if "schicht_group_users" not in cfg:
-            # Migriere alte User-Liste
             cfg["schicht_group_users"] = cfg.get("schicht_group", [])
         if "schicht_group_roles" not in cfg:
             cfg["schicht_group_roles"] = []
@@ -40,7 +38,6 @@ class SchichtCog(commands.Cog):
 
     async def is_in_group(self, member: discord.Member):
         cfg = await self.get_config()
-        # Check User explizit oder Mitglied mind. einer Gruppenrolle
         if member.id in cfg.get("schicht_group_users", []):
             return True
         if utils.has_any_role(member, cfg.get("schicht_group_roles", [])):
@@ -122,8 +119,8 @@ class SchichtCog(commands.Cog):
             return await utils.send_error(interaction, "Du musst dich im Voice-Channel befinden, um eine Schichtübergabe zu starten.")
 
         # Voice-Check: Zielnutzer
-        if user.status != discord.Status.offline and user.voice and user.voice.channel:
-            # Ziel-User ist online & im Voice → beide moven!
+        if user.voice and user.voice.channel:
+            # Beide im Voice, Schichtübergabe
             temp_cat = await self.get_temp_voice_category(guild)
             name = f"Schichtübergabe-{initiator.name}-{user.name}"
             overwrites = {
@@ -149,21 +146,21 @@ class SchichtCog(commands.Cog):
             await utils.send_success(interaction, f"Beide Nutzer wurden in den temporären VoiceMaster verschoben!\nSchichtübergabe läuft jetzt.")
             await self.log_event(
                 guild,
-                f"**Schichtübergabe:** {initiator.mention} → {user.mention} | `{discord.utils.format_dt(discord.utils.utcnow(), 'f')}`"
+                f"Schichtübergabe: {initiator.mention} → {user.mention}"
             )
-            # Channel nach 15 Min löschen
             await asyncio.sleep(60*15)
             try:
                 await temp_voice.delete()
             except Exception:
                 pass
         else:
+            # Zielnutzer ist NICHT im Voice (Initiator aber schon)
             try:
                 await user.send(f"👮‍♂️ **Schichtübergabe:** {initiator.mention} möchte mit dir eine Schichtübergabe durchführen.\nBitte komme schnellstmöglich in Discord und gehe in einen Voice-Channel!")
                 await utils.send_success(interaction, f"User nicht online/im Voice, wurde per DM benachrichtigt.")
                 await self.log_event(
                     guild,
-                    f"**Schichtübergabe-Versuch:** {initiator.mention} → {user.mention} (User offline/kein Voice, per DM erinnert) | `{discord.utils.format_dt(discord.utils.utcnow(), 'f')}`"
+                    f"Schichtübergabe-Versuch: {initiator.mention} → {user.mention} (User offline/kein Voice, per DM erinnert)"
                 )
             except Exception:
                 await utils.send_error(interaction, "User konnte nicht per DM erreicht werden.")
