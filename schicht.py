@@ -56,10 +56,6 @@ class SchichtCog(commands.Cog):
             return guild.get_channel(cfg["log_channel_id"])
         return None
 
-    async def get_temp_voice_category(self, guild):
-        channel = await self.get_voice_channel(guild)
-        return channel.category if channel else None
-
     async def log_event(self, guild, text):
         log_channel = await self.get_log_channel(guild)
         if log_channel:
@@ -83,7 +79,7 @@ class SchichtCog(commands.Cog):
                 "**Ablauf:**\n"
                 "1. Nutze den Command, während du im Voice bist\n"
                 "2. Der neue Nutzer muss in Discord & im Voice-Channel online sein (und in der Schichtgruppe!)\n"
-                "3. Beide werden automatisch in einen temporären VoiceMaster-Kanal verschoben\n"
+                "3. Ihr werdet gemeinsam in den gleichen Channel verschoben (Voicemaster)\n"
                 "4. Übergabe läuft – ggf. relevante Infos im Chat posten!"
             ),
             color=discord.Color.teal()
@@ -118,43 +114,31 @@ class SchichtCog(commands.Cog):
         if not isinstance(initiator, discord.Member) or not initiator.voice or not initiator.voice.channel:
             return await utils.send_error(interaction, "Du musst dich im Voice-Channel befinden, um eine Schichtübergabe zu starten.")
 
-        # Voice-Check: Zielnutzer
+        # Erlaubter Voice-Channel (nur im Voicemaster-Channel oder dessen temporären Kanälen)
+        voicemaster_channel = await self.get_voice_channel(guild)
+        initiator_voice = initiator.voice.channel
+
+        # Prüfe, ob Initiator im richtigen Bereich ist (direkt im Master oder in einem temporären, der darunter liegt)
+        if voicemaster_channel is not None:
+            # Channel oder dessen Kinder
+            if initiator_voice.id != voicemaster_channel.id and (initiator_voice.category_id != voicemaster_channel.category_id):
+                return await utils.send_error(interaction, "Du musst dich im Voicemaster oder in einem der temporären Kanäle befinden!")
+
+        # Ziel-User im Voice?
         if user.voice and user.voice.channel:
-            # Beide im Voice, Schichtübergabe
-            temp_cat = await self.get_temp_voice_category(guild)
-            name = f"Schichtübergabe-{initiator.name}-{user.name}"
-            overwrites = {
-                guild.default_role: discord.PermissionOverwrite(connect=False),
-                initiator: discord.PermissionOverwrite(connect=True),
-                user: discord.PermissionOverwrite(connect=True),
-                guild.me: discord.PermissionOverwrite(connect=True, manage_channels=True)
-            }
-            temp_voice = await guild.create_voice_channel(
-                name=name,
-                overwrites=overwrites,
-                category=temp_cat
-            )
+            # Bewege den Zielnutzer in den Channel des Initiators
             try:
-                await initiator.move_to(temp_voice)
+                await user.move_to(initiator_voice)
                 await asyncio.sleep(0.3)
-                await user.move_to(temp_voice)
+                await utils.send_success(interaction, f"{user.mention} wurde zu dir in den Voice-Channel verschoben!\nSchichtübergabe läuft jetzt.")
+                await self.log_event(
+                    guild,
+                    f"Schichtübergabe: {initiator.mention} → {user.mention}"
+                )
             except Exception as e:
                 await utils.send_error(interaction, f"Fehler beim Verschieben: {e}")
-                await temp_voice.delete()
-                return
-
-            await utils.send_success(interaction, f"Beide Nutzer wurden in den temporären VoiceMaster verschoben!\nSchichtübergabe läuft jetzt.")
-            await self.log_event(
-                guild,
-                f"Schichtübergabe: {initiator.mention} → {user.mention}"
-            )
-            await asyncio.sleep(60*15)
-            try:
-                await temp_voice.delete()
-            except Exception:
-                pass
         else:
-            # Zielnutzer ist NICHT im Voice (Initiator aber schon)
+            # Zieluser NICHT im Voice
             try:
                 await user.send(f"👮‍♂️ **Schichtübergabe:** {initiator.mention} möchte mit dir eine Schichtübergabe durchführen.\nBitte komme schnellstmöglich in Discord und gehe in einen Voice-Channel!")
                 await utils.send_success(interaction, f"User nicht online/im Voice, wurde per DM benachrichtigt.")
@@ -307,7 +291,7 @@ class SchichtCog(commands.Cog):
                     "**Ablauf:**\n"
                     "1. Nutze den Command, während du im Voice bist\n"
                     "2. Der neue Nutzer muss in Discord & im Voice-Channel online sein (und in der Schichtgruppe!)\n"
-                    "3. Beide werden automatisch in einen temporären VoiceMaster-Kanal verschoben\n"
+                    "3. Ihr werdet gemeinsam in den gleichen Channel verschoben (Voicemaster)\n"
                     "4. Übergabe läuft – ggf. relevante Infos im Chat posten!"
                 ),
                 color=discord.Color.teal()
