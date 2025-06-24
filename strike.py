@@ -11,7 +11,7 @@ STRIKE_DATA_PATH = os.path.join("persistent_data", "strike_data.json")
 STRIKE_ROLES_PATH = os.path.join("persistent_data", "strike_roles.json")
 STRIKE_AUTOROLE_PATH = os.path.join("persistent_data", "strike_autorole.json")
 STRIKE_LIST_PATH = os.path.join("persistent_data", "strike_list.json")
-STRIKE_LOG_PATH = os.path.join("persistent_data", "strike_log_channel.json")  # NEU: Für Admin-Log
+STRIKE_LOG_PATH = os.path.join("persistent_data", "strike_log_channel.json")
 
 class StrikeModal(discord.ui.Modal, title="Strike vergeben"):
     grund = discord.ui.TextInput(label="Grund für den Strike", style=discord.TextStyle.long, required=True)
@@ -116,7 +116,11 @@ class StrikeCog(commands.Cog):
             return
         await ch.purge(limit=100, check=lambda m: m.author == guild.me)
         if not data:
-            embed = discord.Embed(title="🛡️ Strikeliste", description="**Derzeit keine Strikes! 🎉**", color=discord.Color.green())
+            embed = discord.Embed(
+                title="🛡️ Strikeliste",
+                description="**Derzeit keine Strikes! 🎉**",
+                color=discord.Color.green()
+            )
             await ch.send(embed=embed)
             return
 
@@ -241,17 +245,41 @@ class StrikeCog(commands.Cog):
             await self.add_strike(user, grund, bild, by_user=interaction.user)
             await self.check_autorole(user, interaction.guild)
             await utils.send_success(modal_interaction, f"{user.mention} hat einen Strike bekommen!")
-            # DM an User
+            # DM an User (unterschiedlich je nach Anzahl!)
             try:
                 data = await self.get_strike_data()
                 anz = len(data.get(str(user.id), []))
-                msg = (
-                    f"**Du hast einen neuen Strike erhalten!**\n\n"
-                    f"**Grund:** {grund}\n"
-                    f"**Bild:** {bild or '-'}\n"
-                    f"**Anzahl deiner Strikes:** {anz}\n\n"
-                    f"{'**Achtung: Bei 3 Strikes folgt eine Strafe!**' if anz == 3 else ''}"
-                )
+                if anz == 1:
+                    msg = (
+                        f"**Du hast einen Strike bekommen!**\n\n"
+                        f"**Grund:** {grund}\n"
+                        f"**Bild:** {bild or '-'}\n\n"
+                        f"Bitte melde dich bei einem **Operation Lead**!\n"
+                        f"(Strikes: {anz}/3)"
+                    )
+                elif anz == 2:
+                    msg = (
+                        f"**Du hast jetzt schon deinen 2ten Strike bekommen!**\n\n"
+                        f"**Grund:** {grund}\n"
+                        f"**Bild:** {bild or '-'}\n\n"
+                        f"Schau dir die Regeln nochmal an. Melde dich bei einem **Teamlead**, um darüber zu sprechen!\n"
+                        f"(Strikes: {anz}/3)"
+                    )
+                elif anz == 3:
+                    msg = (
+                        f"**Es ist soweit... du hast deinen 3ten Strike gesammelt...**\n\n"
+                        f"**Grund:** {grund}\n"
+                        f"**Bild:** {bild or '-'}\n\n"
+                        f"Jetzt muss leider eine Bestrafung folgen. Bitte melde dich **schnellstmöglich bei einem TeamLead**!\n"
+                        f"(Strikes: {anz}/3)"
+                    )
+                else:
+                    msg = (
+                        f"**Du hast einen weiteren Strike erhalten!**\n\n"
+                        f"**Grund:** {grund}\n"
+                        f"**Bild:** {bild or '-'}\n\n"
+                        f"Bitte kläre die Lage mit einem Teamlead."
+                    )
                 await user.send(msg)
             except Exception:
                 pass
