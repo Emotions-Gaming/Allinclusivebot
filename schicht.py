@@ -79,7 +79,7 @@ class SchichtCog(commands.Cog):
                 "**Ablauf:**\n"
                 "1. Nutze den Command, während du im Voice bist\n"
                 "2. Der neue Nutzer muss in Discord & im Voice-Channel online sein (und in der Schichtgruppe!)\n"
-                "3. Beide werden in einen temporären Channel movt (über Voicemaster).\n"
+                "3. Beide werden automatisch in den VoiceMaster-Channel verschoben (temporärer Channel!)\n"
                 "4. Übergabe läuft – ggf. relevante Infos im Chat posten!"
             ),
             color=discord.Color.teal()
@@ -106,52 +106,78 @@ class SchichtCog(commands.Cog):
         if not await self.is_allowed(initiator):
             return await utils.send_permission_denied(interaction)
 
-        # Schichtgruppen-Check
+        # Gruppencheck
         if not await self.is_in_group(user):
             return await utils.send_error(interaction, "Dieser Nutzer ist nicht in der Schichtgruppe (weder explizit noch durch Rolle).")
 
-        # Beide müssen im Voice sein
+        # Initiator muss im Voice sein
         if not isinstance(initiator, discord.Member) or not initiator.voice or not initiator.voice.channel:
-            return await utils.send_error(interaction, "Du musst dich in einem Voice-Channel befinden, um eine Schichtübergabe zu starten.")
-        if not user.voice or not user.voice.channel:
+            return await utils.send_error(interaction, "Du musst dich im Voice-Channel befinden, um eine Schichtübergabe zu starten.")
+
+        # --- Zieluser OFFLINE ---
+        if user.status == discord.Status.offline:
             try:
-                await user.send(f"👮‍♂️ **Schichtübergabe:** {initiator.mention} möchte mit dir eine Schichtübergabe durchführen.\nBitte komme schnellstmöglich in Discord und gehe in einen Voice-Channel!")
+                await user.send(
+                    f"👮‍♂️ **Schichtübergabe:** {initiator.mention} möchte mit dir eine Schichtübergabe durchführen.\nBitte komme schnellstmöglich in Discord und gehe in einen Voice-Channel!"
+                )
             except Exception:
                 pass
-            return await utils.send_error(interaction, f"{user.mention} ist nicht online oder nicht im Voice. Schichtübergabe nicht möglich.")
+            await utils.send_success(interaction, f"{user.mention} wurde per DM benachrichtigt (offline).")
+            await self.log_event(
+                guild,
+                f"Schichtübergabe-Versuch: {initiator.mention} → {user.mention} (User offline, per DM erinnert)"
+            )
+            return
 
-        # Ziel-"Voicemaster"-Channel holen
+        # --- Zieluser NICHT im Voice, aber online ---
+        if not user.voice or not user.voice.channel:
+            try:
+                await user.send(
+                    f"👮‍♂️ **Schichtübergabe:** {initiator.mention} möchte mit dir eine Schichtübergabe durchführen.\nBitte komme schnellstmöglich in Discord und gehe in einen Voice-Channel!"
+                )
+            except Exception:
+                pass
+            await utils.send_success(interaction, f"{user.mention} ist nicht online im Voice. Er wurde per DM benachrichtigt.")
+            await self.log_event(
+                guild,
+                f"Schichtübergabe-Versuch: {initiator.mention} → {user.mention} (User online, aber nicht im Voice, per DM erinnert)"
+            )
+            return
+
+        # --- Beide sind im Voice: Ablauf mit Voicemaster ---
+        # Schritt 1: Initiator in den Voicemaster "Wartekanal" verschieben
         voicemaster_channel = await self.get_voice_channel(guild)
         if not voicemaster_channel:
-            return await utils.send_error(interaction, "Der Ziel-VoiceChannel für Schichtübergaben ist nicht gesetzt.")
+            return await utils.send_error(interaction, "VoiceMaster-Channel ist nicht konfiguriert.")
 
-        # 1. Initiator zum Voicemaster moven
         try:
             await initiator.move_to(voicemaster_channel)
         except Exception as e:
-            return await utils.send_error(interaction, f"Konnte dich nicht in den Voicemaster verschieben: {e}")
+            return await utils.send_error(interaction, f"Konnte dich nicht verschieben: {e}")
 
-        # 2. Voicemaster erstellt automatisch neuen temporären Channel und movt Initiator rein
-        await asyncio.sleep(3)  # Gib dem Bot Zeit, Channel zu erstellen und Initiator zu moven
+        await utils.send_success(interaction, "Du wirst in den Voicemaster verschoben. Einen Moment bitte...")
 
-        # 3. Neuen Channel herausfinden, in dem Initiator jetzt ist
-        initiator_new_channel = initiator.voice.channel if initiator.voice and initiator.voice.channel else None
+        # Schritt 2: Warte 3 Sekunden, dann überprüfe, in welchem Channel Initiator jetzt ist (wegen Auto-Channel vom Voicemaster-Bot)
+        await asyncio.sleep(3)
+        initiator_member = guild.get_member(initiator.id)
+        target_channel = initiator_member.voice.channel if initiator_member.voice else None
 
-        if initiator_new_channel and initiator_new_channel.id != voicemaster_channel.id:
-            # Move den Zieluser zu diesem neuen Channel
-            try:
-                await user.move_to(initiator_new_channel)
-                await utils.send_success(interaction, f"{user.mention} wurde zu dir in den temporären Voice-Channel verschoben!\nSchichtübergabe läuft jetzt.")
-                await self.log_event(
-                    guild,
-                    f"Schichtübergabe: {initiator.mention} → {user.mention}"
-                )
-            except Exception as e:
-                await utils.send_error(interaction, f"Fehler beim Verschieben: {e}")
-        else:
-            await utils.send_error(interaction, "Konnte den temporären Channel nach dem Move nicht finden – vielleicht ist etwas schiefgelaufen?")
+        if not target_channel:
+            return await utils.send_error(interaction, "Fehler: Nach dem Verschieben wurdest du in keinen VoiceChannel gefunden.")
 
-    # --- Rest wie gehabt: Rollen, Infos, Gruppe, Setup usw. ---
+        # Schritt 3: Move den Zieluser dorthin
+        try:
+            await user.move_to(target_channel)
+        except Exception as e:
+            return await utils.send_error(interaction, f"Konnte {user.mention} nicht verschieben: {e}")
+
+        await utils.send_success(interaction, f"Beide Nutzer wurden in den temporären Channel verschoben!\nSchichtübergabe läuft jetzt.")
+        await self.log_event(
+            guild,
+            f"Schichtübergabe: {initiator.mention} → {user.mention}"
+        )
+
+    # --- Restliche Kommandos bleiben wie gehabt ---
 
     @app_commands.command(
         name="schichtsetrolle",
@@ -234,6 +260,7 @@ class SchichtCog(commands.Cog):
             color=discord.Color.teal()
         )
 
+    # ------------- NEU: Rollen ODER User zur Schichtgruppe hinzufügen -------------
     @app_commands.command(
         name="schichtgroup",
         description="Fügt einen Nutzer ODER eine Rolle zur Schichtgruppe hinzu (nur Admin)."
@@ -282,6 +309,7 @@ class SchichtCog(commands.Cog):
             else:
                 await utils.send_error(interaction, f"Rolle {target.mention} ist nicht in der Schichtgruppe.")
 
+    # ===== Menu-Refresh für SetupBot =====
     async def reload_menu(self, channel_id):
         guild = self.bot.get_guild(GUILD_ID)
         channel = guild.get_channel(channel_id)
@@ -293,7 +321,7 @@ class SchichtCog(commands.Cog):
                     "**Ablauf:**\n"
                     "1. Nutze den Command, während du im Voice bist\n"
                     "2. Der neue Nutzer muss in Discord & im Voice-Channel online sein (und in der Schichtgruppe!)\n"
-                    "3. Beide werden gemeinsam in den eingestellten Schicht-Channel movt (über Voicemaster).\n"
+                    "3. Beide werden automatisch in den VoiceMaster-Channel verschoben (temporärer Channel!)\n"
                     "4. Übergabe läuft – ggf. relevante Infos im Chat posten!"
                 ),
                 color=discord.Color.teal()
