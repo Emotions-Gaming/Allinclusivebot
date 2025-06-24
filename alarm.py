@@ -1,6 +1,4 @@
-﻿# alarm.py
-
-import discord
+﻿import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -80,110 +78,7 @@ class AlarmCog(commands.Cog):
         lead_id = cfg.get("lead_id")
         return utils.is_admin(user) or (lead_id and int(lead_id) == user.id)
 
-    # ========== Views ==========
-class AlarmMainPanelView(discord.ui.View):
-    def __init__(self, cog):
-        super().__init__(timeout=None)
-        self.cog = cog
-
-    @discord.ui.button(label="Schichtanfrage erstellen", style=discord.ButtonStyle.green, emoji="🟢")
-    async def create_alarm(self, interaction: Interaction, button: discord.ui.Button):
-        cog = self.cog
-        if not await cog.is_lead(interaction.user, interaction.guild):
-            return await utils.send_permission_denied(interaction)
-        await interaction.response.send_modal(AlarmCreateModal(cog))
-
-    @discord.ui.button(label="Befehl kopieren", style=discord.ButtonStyle.gray, emoji="📋")
-    async def copy_cmd(self, interaction: Interaction, button: discord.ui.Button):
-        await utils.send_ephemeral(
-            interaction,
-            text="Kopiere den Befehl unten:\n```/alarmzuteilung [user]```",
-            emoji="📋",
-            color=discord.Color.blurple()
-        )
-
-class AlarmCreateModal(discord.ui.Modal, title="Neue Schichtanfrage erstellen"):
-    def __init__(self, cog):
-        super().__init__()
-        self.cog = cog
-        self.streamer = discord.ui.TextInput(
-            label="Streamername(n)",
-            placeholder="Wen betreust du? (Mehrere möglich)",
-            required=True
-        )
-        self.zeit = discord.ui.TextInput(
-            label="Datum/Uhrzeit der Schicht",
-            placeholder="z.B. 23.07.2025 19:00-22:00 Uhr",
-            required=True
-        )
-        self.add_item(self.streamer)
-        self.add_item(self.zeit)
-
-    async def on_submit(self, interaction: Interaction):
-        cog = self.cog
-        cfg = await cog.get_config()
-        channel = interaction.channel
-        user_role_ids = cfg.get("user_role_ids", [])
-        ping_roles = utils.mention_roles(interaction.guild, user_role_ids)
-        embed = discord.Embed(
-            title="📝 Schichtanfrage",
-            description=(
-                f"**Streamer:** {self.streamer.value}\n"
-                f"**Zeit:** {self.zeit.value}\n\n"
-                f"{ping_roles if ping_roles else '_(Keine Rollen zum Pingen gesetzt)_'}\n"
-                "\nKlicke auf den Button, um diese Schicht zu übernehmen!"
-            ),
-            color=discord.Color.green(),
-            timestamp=datetime.now()
-        )
-        view = ClaimView(cog, self.streamer.value, self.zeit.value)
-        msg = await channel.send(embed=embed, view=view)
-        await interaction.response.send_message("Schichtanfrage gepostet!", ephemeral=True)
-
-class ClaimView(discord.ui.View):
-    def __init__(self, cog, streamer, zeit):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.streamer = streamer
-        self.zeit = zeit
-
-    @discord.ui.button(label="Schicht übernehmen", style=discord.ButtonStyle.green, emoji="✅")
-    async def claim_btn(self, interaction: Interaction, button: discord.ui.Button):
-        cfg = await self.cog.get_config()
-        # Jeder darf claimen!
-        claimer = interaction.user
-        zeitinfo = self.zeit
-        streamerinfo = self.streamer
-        log_channel = interaction.guild.get_channel(cfg.get("log_channel_id", 0)) if cfg.get("log_channel_id") else None
-        info_text = (
-            f"**Danke fürs Übernehmen der Schicht am {zeitinfo}!**\n"
-            f"Du hast folgende Streamer: **{streamerinfo}**"
-        )
-        # DM versuchen
-        try:
-            await claimer.send(info_text)
-            dm_ok = True
-        except Exception:
-            dm_ok = False
-        # Log
-        log_msg = (
-            f"✅ {claimer.mention} hat die Schicht am `{zeitinfo}` für **{streamerinfo}** angenommen und wurde somit eingeteilt."
-        )
-        if log_channel:
-            await log_channel.send(log_msg)
-            if not dm_ok:
-                await log_channel.send(
-                    f"⚠️ {claimer.mention} konnte nicht angeschrieben werden (DM blockiert oder nicht erlaubt). Bitte selbstständig melden!"
-                )
-        # Antwort & Löschen
-        await interaction.response.send_message("Schicht übernommen!", ephemeral=True)
-        try:
-            await interaction.message.delete()
-        except Exception:
-            pass
-
-# ========== Slash Commands ==========
-
+    # ========== Slash Commands ==========
     @app_commands.command(
         name="alarmmain",
         description="Postet oder aktualisiert das Alarm-Schichtsystem-Panel (nur Lead/Admin)."
@@ -304,6 +199,103 @@ class ClaimView(discord.ui.View):
             return await utils.send_permission_denied(interaction)
         await interaction.response.send_modal(AlarmZuteilModal(self, user))
 
+class AlarmMainPanelView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="Schichtanfrage erstellen", style=discord.ButtonStyle.green, emoji="🟢")
+    async def create_alarm(self, interaction: Interaction, button: discord.ui.Button):
+        cog = self.cog
+        if not await cog.is_lead(interaction.user, interaction.guild):
+            return await utils.send_permission_denied(interaction)
+        await interaction.response.send_modal(AlarmCreateModal(cog))
+
+    @discord.ui.button(label="Befehl kopieren", style=discord.ButtonStyle.gray, emoji="📋")
+    async def copy_cmd(self, interaction: Interaction, button: discord.ui.Button):
+        await utils.send_ephemeral(
+            interaction,
+            text="Kopiere den Befehl unten:\n```/alarmzuteilung [user]```",
+            emoji="📋",
+            color=discord.Color.blurple()
+        )
+
+class AlarmCreateModal(discord.ui.Modal, title="Neue Schichtanfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(
+            label="Streamername(n)",
+            placeholder="Wen betreust du? (Mehrere möglich)",
+            required=True
+        )
+        self.zeit = discord.ui.TextInput(
+            label="Datum/Uhrzeit der Schicht",
+            placeholder="z.B. 23.07.2025 19:00-22:00 Uhr",
+            required=True
+        )
+        self.add_item(self.streamer)
+        self.add_item(self.zeit)
+
+    async def on_submit(self, interaction: Interaction):
+        cog = self.cog
+        cfg = await cog.get_config()
+        channel = interaction.channel
+        user_role_ids = cfg.get("user_role_ids", [])
+        ping_roles = utils.mention_roles(interaction.guild, user_role_ids)
+        embed = discord.Embed(
+            title="📝 Schichtanfrage",
+            description=(
+                f"**Streamer:** {self.streamer.value}\n"
+                f"**Zeit:** {self.zeit.value}\n\n"
+                f"{ping_roles if ping_roles else '_(Keine Rollen zum Pingen gesetzt)_'}\n"
+                "\nKlicke auf den Button, um diese Schicht zu übernehmen!"
+            ),
+            color=discord.Color.green(),
+            timestamp=datetime.now()
+        )
+        view = ClaimView(cog, self.streamer.value, self.zeit.value)
+        msg = await channel.send(embed=embed, view=view)
+        await interaction.response.send_message("Schichtanfrage gepostet!", ephemeral=True)
+
+class ClaimView(discord.ui.View):
+    def __init__(self, cog, streamer, zeit):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.streamer = streamer
+        self.zeit = zeit
+
+    @discord.ui.button(label="Schicht übernehmen", style=discord.ButtonStyle.green, emoji="✅")
+    async def claim_btn(self, interaction: Interaction, button: discord.ui.Button):
+        cfg = await self.cog.get_config()
+        claimer = interaction.user
+        zeitinfo = self.zeit
+        streamerinfo = self.streamer
+        log_channel = interaction.guild.get_channel(cfg.get("log_channel_id", 0)) if cfg.get("log_channel_id") else None
+        info_text = (
+            f"**Danke fürs Übernehmen der Schicht am {zeitinfo}!**\n"
+            f"Du hast folgende Streamer: **{streamerinfo}**"
+        )
+        try:
+            await claimer.send(info_text)
+            dm_ok = True
+        except Exception:
+            dm_ok = False
+        log_msg = (
+            f"✅ {claimer.mention} hat die Schicht am `{zeitinfo}` für **{streamerinfo}** angenommen und wurde somit eingeteilt."
+        )
+        if log_channel:
+            await log_channel.send(log_msg)
+            if not dm_ok:
+                await log_channel.send(
+                    f"⚠️ {claimer.mention} konnte nicht angeschrieben werden (DM blockiert oder nicht erlaubt). Bitte selbstständig melden!"
+                )
+        await interaction.response.send_message("Schicht übernommen!", ephemeral=True)
+        try:
+            await interaction.message.delete()
+        except Exception:
+            pass
+
 class AlarmZuteilModal(discord.ui.Modal, title="User direkt zu Schicht zuweisen"):
     def __init__(self, cog, user):
         super().__init__()
@@ -334,13 +326,11 @@ class AlarmZuteilModal(discord.ui.Modal, title="User direkt zu Schicht zuweisen"
             f"Du betreust folgende Streamer: **{streamerinfo}**\n"
             "Bitte sei 15 Minuten vor Schichtbeginn im General anwesend!"
         )
-        # DM versuchen
         try:
             await target.send(dm_text)
             dm_ok = True
         except Exception:
             dm_ok = False
-        # Log
         log_msg = (
             f"📝 {lead.mention} hat {target.mention} zur Schicht am `{zeitinfo}` für **{streamerinfo}** eingeteilt."
         )
