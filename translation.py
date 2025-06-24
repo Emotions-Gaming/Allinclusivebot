@@ -5,6 +5,7 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 import os
 import utils
+import openai
 import asyncio
 from datetime import datetime
 
@@ -16,20 +17,93 @@ CATEGORY_PATH = os.path.join("persistent_data", "trans_category.json")
 PROMPT_PATH = os.path.join("persistent_data", "translator_prompt.json")
 TRANSLATION_LOG_PATH = os.path.join("persistent_data", "translation_log.json")
 
-# Dummy-Übersetzung (hier später API call einbauen!)
-async def translate_text(text, style, prompt):
-    # Hier kannst du OpenAI/Google/andere API einbauen!
-    # Prompt-Logik: Wenn deutsch, -> englisch; Wenn englisch, -> deutsch.
-    # Prompt-Stil dranhängen, Zusatzregeln immer dranhängen.
-    # Keine Emojis, kein KI-Talk, keine Smileys, kein Icon!
-    return f"[{style}] {text[::-1]} (Simulierte Übersetzung)"  # Dummy: rückwärts als Demo.
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+
+# Setze OpenAI-Key
+openai.api_key = OPENAI_API_KEY
+
+# ======= Basis Prompt =======
+BASE_PROMPT = (
+    "Du bist ein professioneller Übersetzer. "
+    "Übersetze NUR den eingegebenen Text ins jeweils andere (englisch/deutsch), "
+    "ohne Anführungszeichen, ohne Kommentare, keine Hinweise, keine Emojis, kein Smalltalk, "
+    "nur die reine Übersetzung, kein Originaltext, keine KI-Infos. "
+    "Keine doppelten Leerzeichen. Stil und Sonderregeln siehe unten."
+)
+
+# ====== Hilfsfunktionen =======
+
+def detect_language(text):
+    import re
+    # Sehr simple Heuristik: Viele Umlaute, ß → deutsch, sonst englisch
+    if re.search(r"[äöüÄÖÜß]", text) or re.search(r"\b(der|die|das|und|ich|nicht|mit|für|ist|sind|auf|zu|wie)\b", text, re.I):
+        return "de"
+    if re.search(r"\b(the|and|you|with|for|is|are|on|to|how|in|of|that)\b", text, re.I):
+        return "en"
+    # Default: Wenn überwiegend ASCII → englisch, sonst deutsch
+    if all(ord(c) < 128 for c in text):
+        return "en"
+    return "de"
+
+async def translate_text_gpt(text, stil, prompt_extra):
+    system_prompt = BASE_PROMPT
+    # Zielrichtung erkennen
+    lang = detect_language(text)
+    if lang == "de":
+        system_prompt += " Ziel: Übersetze ins Englisch."
+    else:
+        system_prompt += " Ziel: Übersetze ins Deutsch."
+    # Stil und extra Prompts anhängen (optional)
+    if stil:
+        system_prompt += f" Stil: {stil}."
+    if prompt_extra:
+        system_prompt += " Zusatzregeln: " + prompt_extra
+
+    try:
+        # GPT-3.5 turbo für Speed/Preis-Leistung, alternativ gpt-4o für maximale Qualität
+        response = await openai.ChatCompletion.acreate(
+            model="gpt-3.5-turbo",  # oder "gpt-4o" für noch bessere Results
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": text}
+            ],
+            temperature=0.0,  # Immer exakt, kein Rumgespinne
+            max_tokens=500
+        )
+        result = response.choices[0].message.content.strip()
+        # Kein Text = Fallback
+        if not result:
+            return "*Fehler: Keine Antwort*"
+        # Entferne überflüssige Zeilen, falls GPT doch mal was "erklärt"
+        result = result.split("\n")[0]
+        return result
+    except Exception as ex:
+        return f"*Fehler bei GPT: {ex}*"
+
+# ========== UI für Kopierfeld ==========
+
+class CopyView(discord.ui.View):
+    def __init__(self, text):
+        super().__init__(timeout=60)
+        self.text = text
+
+    @discord.ui.button(label="Kopiere Übersetzung", style=discord.ButtonStyle.gray, emoji="📋")
+    async def copy_btn(self, interaction: Interaction, button: discord.ui.Button):
+        await utils.send_ephemeral(
+            interaction,
+            text=f"```{self.text}```",
+            emoji="📋",
+            color=discord.Color.green()
+        )
+
+# ========== Main Cog ==========
 
 class TranslationCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.active_sessions = {}  # user_id → channel_id
 
-    # ==== Helper ====
+    # ==== Helper ==== (wie gehabt)
 
     async def get_profiles(self):
         return await utils.load_json(PROFILES_PATH, {})
@@ -82,7 +156,7 @@ class TranslationCog(commands.Cog):
     async def save_log(self, data):
         await utils.save_json(TRANSLATION_LOG_PATH, data)
 
-    # ==== Menu/Dynamic Views ====
+    # ==== Menu/Dynamic Views ==== (wie gehabt)
     class ProfileDropdown(discord.ui.Select):
         def __init__(self, profiles, callback):
             options = [discord.SelectOption(label=name, description=stil[:80]) for name, stil in profiles.items()]
@@ -101,7 +175,7 @@ class TranslationCog(commands.Cog):
         async def end_btn(self, interaction: Interaction, button: discord.ui.Button):
             await self.send_log_cb(interaction)
 
-    # ==== Slash Commands ====
+    # ==== Slash Commands ==== (wie gehabt, keine Änderung nötig)
 
     @app_commands.command(
         name="translatorpost",
@@ -121,7 +195,7 @@ class TranslationCog(commands.Cog):
         )
         view = discord.ui.View()
         view.add_item(self.ProfileDropdown(profiles, self.start_session_callback))
-        msg = await interaction.channel.send(embed=embed, view=view)
+        await interaction.channel.send(embed=embed, view=view)
         await self.set_menu_channel(interaction.channel.id)
         await utils.send_success(interaction, "Übersetzungsmenü wurde gepostet!")
 
@@ -289,10 +363,11 @@ class TranslationCog(commands.Cog):
         )
         await utils.send_ephemeral(interaction, embed=embed)
 
-    # ==== Message Listener ====
+    # ==== Message Listener – GPT-Übersetzung + CopyView ====
+
     @commands.Cog.listener()
     async def on_message(self, message):
-        # Check if DM or not in Session
+        # Nur in Sessions
         if message.author.bot or not message.guild:
             return
         user = message.author
@@ -302,7 +377,7 @@ class TranslationCog(commands.Cog):
         if not channel or channel.id != message.channel.id:
             return
 
-        # Fetch session details
+        # Profil/Prompt holen
         profile_name = None
         if channel.name.startswith("translat-"):
             try:
@@ -313,15 +388,13 @@ class TranslationCog(commands.Cog):
             return
 
         profiles = await self.get_profiles()
-        stil = profiles.get(profile_name)
-        if not stil:
-            return
+        stil = profiles.get(profile_name, "")
         prompts = await self.get_prompts()
         prompt = " ".join(prompts)
 
-        # Call translation (dummy)
+        # API-Call OpenAI
         try:
-            translated = await translate_text(message.content, stil, prompt)
+            translated = await translate_text_gpt(message.content, stil, prompt)
         except Exception:
             translated = "*Fehler bei Übersetzung*"
 
@@ -335,17 +408,14 @@ class TranslationCog(commands.Cog):
         })
         await self.save_log(log)
 
-        # Respond as embed
-        embed = discord.Embed(
-            title=f"Übersetzung ({profile_name})",
-            description=f"**Original:**\n{message.content}\n\n**Übersetzung:**\n{translated}",
-            color=discord.Color.green()
+        # **Reine Text-Antwort + Copy-Button (nur der Übersetzungstext)**
+        await channel.send(
+            f"```{translated}```",
+            view=CopyView(translated)
         )
-        await channel.send(f"{user.mention}", embed=embed)
 
     # ===== Menu-Refresh für Setupbot =====
     async def reload_menu(self, channel_id):
-        """Für setupbot.py: postet das Profil-Dropdown neu."""
         guild = self.bot.get_guild(GUILD_ID)
         channel = guild.get_channel(channel_id)
         profiles = await self.get_profiles()
