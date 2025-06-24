@@ -7,6 +7,7 @@ import os
 import utils
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 SETUP_CONFIG_PATH = os.path.join("persistent_data", "setup_config.json")
 
 SYSTEMS = [
@@ -43,7 +44,7 @@ class SetupBotCog(commands.Cog):
         name="startsetup",
         description="Startet das geführte Setup für alle Hauptsysteme (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def start_setup(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -80,7 +81,7 @@ class SetupBotCog(commands.Cog):
         name="refreshposts",
         description="Postet alle Hauptmenüs in die gespeicherten Channels neu (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def refresh_posts(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -96,7 +97,7 @@ class SetupBotCog(commands.Cog):
         name="setupstatus",
         description="Zeigt den aktuellen Setup-Status und alle Menüs/Channels (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def setup_status(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -122,7 +123,7 @@ class SetupBotCog(commands.Cog):
         name="startuse",
         description="Schaltet den Bot auf produktiv (setzt setup_complete auf true) (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def start_use(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

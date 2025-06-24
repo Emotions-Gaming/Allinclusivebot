@@ -8,6 +8,7 @@ import utils
 import asyncio
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 SCHICHT_CONFIG_PATH = os.path.join("persistent_data", "schicht_config.json")
 
 class SchichtCog(commands.Cog):
@@ -65,7 +66,7 @@ class SchichtCog(commands.Cog):
         name="schichtmain",
         description="Postet das Schichtübergabe-Panel mit Copy-Codeblock (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtmain(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -93,7 +94,7 @@ class SchichtCog(commands.Cog):
         name="schichtuebergabe",
         description="Übergibt die Schicht an einen anderen Nutzer aus der Schichtgruppe."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtuebergabe(self, interaction: Interaction, user: discord.Member):
         cfg = await self.get_config()
         initiator = interaction.user
@@ -165,7 +166,7 @@ class SchichtCog(commands.Cog):
         name="schichtsetrolle",
         description="Fügt eine Rolle als Schichtrolle hinzu (darf Übergaben machen)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtsetrolle(self, interaction: Interaction, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -179,7 +180,7 @@ class SchichtCog(commands.Cog):
         name="schichtremoverolle",
         description="Entfernt eine Rolle von den Schichtrollen."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtremoverolle(self, interaction: Interaction, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -193,7 +194,7 @@ class SchichtCog(commands.Cog):
         name="schichtsetvoice",
         description="Setzt den Ziel-VoiceChannel für Schichtübergaben."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtsetvoice(self, interaction: Interaction, channel: discord.VoiceChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -206,7 +207,7 @@ class SchichtCog(commands.Cog):
         name="schichtsetlog",
         description="Setzt den Log-Channel für Schichtübergaben."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtsetlog(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -219,7 +220,7 @@ class SchichtCog(commands.Cog):
         name="schichtinfo",
         description="Zeigt die aktuelle Schicht-Konfiguration."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtinfo(self, interaction: Interaction):
         cfg = await self.get_config()
         guild = interaction.guild
@@ -244,7 +245,7 @@ class SchichtCog(commands.Cog):
         name="schichtgroup",
         description="Fügt einen Nutzer zur Schichtgruppe hinzu (nur Admin)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtgroup(self, interaction: Interaction, user: discord.Member):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -260,7 +261,7 @@ class SchichtCog(commands.Cog):
         name="schichtgroupremove",
         description="Entfernt einen Nutzer aus der Schichtgruppe (nur Admin)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def schichtgroupremove(self, interaction: Interaction, user: discord.Member):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

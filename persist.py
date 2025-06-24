@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import utils
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 PERSIST_PATH = "persistent_data"
 BACKUP_ROOT = "railway_data_backup"
 LOG_CHANNEL_PATH = os.path.join(PERSIST_PATH, "persist_log_channel.json")  # Speichert optional den Log-Channel
@@ -80,7 +81,7 @@ class PersistCog(commands.Cog):
         name="backupnow",
         description="Erstellt sofort ein vollständiges Backup aller Bot-Daten (Admin-Only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def backup_now(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -117,7 +118,7 @@ class PersistCog(commands.Cog):
         name="restorenow",
         description="Stellt alle Daten aus dem letzten Backup wieder her (Admin-Only, überschreibt alles!)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def restore_now(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -144,7 +145,7 @@ class PersistCog(commands.Cog):
         name="persistlogchannel",
         description="Setzt den Log-Channel für Persistenz-Events."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def set_log_channel(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

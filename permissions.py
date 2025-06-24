@@ -8,6 +8,7 @@ import utils
 import asyncio
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 PERMISSIONS_PATH = os.path.join("persistent_data", "commands_permissions.json")
 
 class PermissionsCog(commands.Cog):
@@ -39,7 +40,7 @@ class PermissionsCog(commands.Cog):
         name="befehlpermission",
         description="Gibt einer Rolle das Recht, einen Command zu nutzen (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def add_permission(self, interaction: Interaction, command: str, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -59,7 +60,7 @@ class PermissionsCog(commands.Cog):
         name="befehlpermissionremove",
         description="Entzieht einer Rolle das Recht für einen Command (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def remove_permission(self, interaction: Interaction, command: str, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -75,7 +76,7 @@ class PermissionsCog(commands.Cog):
         name="befehlpermissions",
         description="Zeigt die erlaubten Rollen für einen Command (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def list_permissions(self, interaction: Interaction, command: str):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -93,7 +94,7 @@ class PermissionsCog(commands.Cog):
         name="refreshpermissions",
         description="Synchronisiert alle Slash-Command-Rechte auf dem Server (Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def refresh_permissions(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 PROFILES_PATH = os.path.join("persistent_data", "profiles.json")
 MENU_PATH = os.path.join("persistent_data", "translator_menu.json")
 CATEGORY_PATH = os.path.join("persistent_data", "trans_category.json")
@@ -106,7 +107,7 @@ class TranslationCog(commands.Cog):
         name="translatorpost",
         description="Postet das Übersetzungsmenü für User (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatorpost(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -195,7 +196,7 @@ class TranslationCog(commands.Cog):
         name="translatoraddprofile",
         description="Fügt ein neues Übersetzerprofil hinzu (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatoraddprofile(self, interaction: Interaction, name: str, stil: str):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -208,7 +209,7 @@ class TranslationCog(commands.Cog):
         name="translatordeleteprofile",
         description="Löscht ein Übersetzerprofil (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatordeleteprofile(self, interaction: Interaction, name: str):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -223,7 +224,7 @@ class TranslationCog(commands.Cog):
         name="translatorlog",
         description="Setzt den Logchannel für Übersetzungsverläufe (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatorlog(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -234,7 +235,7 @@ class TranslationCog(commands.Cog):
         name="translatorsetcategorie",
         description="Setzt die Kategorie für Übersetzungs-Sessions (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatorsetcategorie(self, interaction: Interaction, category: discord.CategoryChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -245,7 +246,7 @@ class TranslationCog(commands.Cog):
         name="translatorprompt",
         description="Fügt eine Zusatzregel (Prompt) hinzu (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatorprompt(self, interaction: Interaction, text: str):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -256,7 +257,7 @@ class TranslationCog(commands.Cog):
         name="translatorpromptdelete",
         description="Entfernt eine Zusatzregel anhand der Nummer (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatorpromptdelete(self, interaction: Interaction, nummer: int):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -271,7 +272,7 @@ class TranslationCog(commands.Cog):
         name="translatorpromptview",
         description="Zeigt alle aktiven Prompt-Regeln für Übersetzungen (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def translatorpromptview(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

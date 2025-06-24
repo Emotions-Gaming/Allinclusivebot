@@ -9,6 +9,7 @@ import asyncio
 from datetime import datetime
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 STRIKE_DATA_PATH = os.path.join("persistent_data", "strike_data.json")
 STRIKE_ROLES_PATH = os.path.join("persistent_data", "strike_roles.json")
 STRIKE_AUTOROLE_PATH = os.path.join("persistent_data", "strike_autorole.json")
@@ -123,7 +124,7 @@ class StrikeCog(commands.Cog):
         name="strikemaininfo",
         description="Zeigt die Info & Anleitung für das Strike-System (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikemaininfo(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -145,7 +146,7 @@ class StrikeCog(commands.Cog):
         name="strikegive",
         description="Vergibt einen Strike an einen Nutzer (nur Teamleads/Admins/Sonderrollen)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikegive(self, interaction: Interaction, user: discord.Member):
         if not await self.is_strike_mod(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -177,7 +178,7 @@ class StrikeCog(commands.Cog):
         name="strikeview",
         description="Zeigt dir privat deine aktuellen Strikes an."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikeview(self, interaction: Interaction):
         data = await self.get_strike_data()
         strikes = data.get(str(interaction.user.id), [])
@@ -194,7 +195,7 @@ class StrikeCog(commands.Cog):
         name="strikelist",
         description="Setzt den Channel für die Strike-Übersicht & postet alle aktiven Strikes (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikelist(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -206,7 +207,7 @@ class StrikeCog(commands.Cog):
         name="strikeremove",
         description="Entfernt den letzten Strike eines Users (nur Teamleads/Admins/Sonderrollen)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikeremove(self, interaction: Interaction, user: discord.Member):
         if not await self.is_strike_mod(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -218,7 +219,7 @@ class StrikeCog(commands.Cog):
         name="strikedelete",
         description="Setzt alle Strikes eines Users zurück (nur Teamleads/Admins/Sonderrollen)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikedelete(self, interaction: Interaction, user: discord.Member):
         if not await self.is_strike_mod(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -230,7 +231,7 @@ class StrikeCog(commands.Cog):
         name="strikerole",
         description="Fügt eine Rolle zu den Strike-Berechtigten hinzu (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikerole(self, interaction: Interaction, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -244,7 +245,7 @@ class StrikeCog(commands.Cog):
         name="strikerole_remove",
         description="Entfernt eine Rolle von den Strike-Berechtigten (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikerole_remove(self, interaction: Interaction, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -258,7 +259,7 @@ class StrikeCog(commands.Cog):
         name="strikeaddrole",
         description="Setzt die Auto-Role bei 3 Strikes (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikeaddrole(self, interaction: Interaction, role: discord.Role):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -269,7 +270,7 @@ class StrikeCog(commands.Cog):
         name="strikeaddrole_remove",
         description="Entfernt die Auto-Role bei 3 Strikes (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def strikeaddrole_remove(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

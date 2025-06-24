@@ -7,7 +7,9 @@ import os
 import utils
 from datetime import datetime
 
+
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 WIKI_PAGES_PATH = os.path.join("persistent_data", "wiki_pages.json")
 WIKI_BACKUP_PATH = os.path.join("persistent_data", "wiki_backup.json")
 WIKI_MAIN_CHANNEL_PATH = os.path.join("persistent_data", "wiki_main_channel.json")
@@ -96,7 +98,7 @@ class WikiCog(commands.Cog):
         name="wikimain",
         description="Setzt den Hauptkanal für das Wiki-Menü (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def wikimain(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -108,7 +110,7 @@ class WikiCog(commands.Cog):
         name="wiki_page",
         description="Speichert den aktuellen Channel als neue Wiki-Seite (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def wiki_page(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -141,7 +143,7 @@ class WikiCog(commands.Cog):
         name="wiki_delete",
         description="Löscht eine Wiki-Seite (nur Admins, Dropdown-Auswahl)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def wiki_delete(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -158,7 +160,7 @@ class WikiCog(commands.Cog):
         name="wiki_edit",
         description="Bearbeitet eine Wiki-Seite (nur Admins, Dropdown/Modal)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def wiki_edit(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -174,7 +176,7 @@ class WikiCog(commands.Cog):
         name="wiki_backup",
         description="Stellt eine Wiki-Seite aus dem Backup als neuen Channel wieder her (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def wiki_backup(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)

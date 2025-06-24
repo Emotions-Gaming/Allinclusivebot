@@ -8,6 +8,7 @@ import utils
 from datetime import datetime
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
+MY_GUILD = discord.Object(id=GUILD_ID)
 ALARM_CONFIG_PATH = os.path.join("persistent_data", "alarm_config.json")
 
 def format_time(ts=None):
@@ -187,7 +188,7 @@ class ClaimView(discord.ui.View):
         name="alarmmain",
         description="Postet oder aktualisiert das Alarm-Schichtsystem-Panel (nur Lead/Admin)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmmain(self, interaction: Interaction):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
@@ -202,7 +203,7 @@ class ClaimView(discord.ui.View):
         name="alarmlead",
         description="Setzt den AlarmLead für Schichten (nur Admins/Lead)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmlead(self, interaction: Interaction, user: discord.Member):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -216,7 +217,7 @@ class ClaimView(discord.ui.View):
         name="alarmlead_remove",
         description="Entfernt den aktuellen AlarmLead (nur Admins)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmlead_remove(self, interaction: Interaction, user: discord.Member):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
@@ -233,7 +234,7 @@ class ClaimView(discord.ui.View):
         name="alarmlead_info",
         description="Zeigt den aktuellen AlarmLead (privat, nur Admins/Lead)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmlead_info(self, interaction: Interaction):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
@@ -251,7 +252,7 @@ class ClaimView(discord.ui.View):
         name="alarmusers_add",
         description="Fügt eine Rolle zu den pingbaren Userrollen hinzu."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmusers_add(self, interaction: Interaction, role: discord.Role):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
@@ -266,7 +267,7 @@ class ClaimView(discord.ui.View):
         name="alarmusers_remove",
         description="Entfernt eine Rolle von den pingbaren Userrollen."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmusers_remove(self, interaction: Interaction, role: discord.Role):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
@@ -284,7 +285,7 @@ class ClaimView(discord.ui.View):
         name="alarmlog",
         description="Setzt den Logchannel für Claims/Zuteilungen."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmlog(self, interaction: Interaction, channel: discord.TextChannel):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
@@ -297,7 +298,7 @@ class ClaimView(discord.ui.View):
         name="alarmzuteilung",
         description="Teilt direkt einen User einer Schicht zu (Modal, Lead/Admin only)."
     )
-    @app_commands.guilds(GUILD_ID)
+    @app_commands.guilds(MY_GUILD)
     async def alarmzuteilung(self, interaction: Interaction, user: discord.Member):
         if not await self.is_lead(interaction.user, interaction.guild):
             return await utils.send_permission_denied(interaction)
