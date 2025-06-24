@@ -313,3 +313,4 @@ class WikiBackupDropdown(discord.ui.Select):
 # ========== Setup ==========
 async def setup(bot):
     await bot.add_cog(WikiCog(bot))
+
