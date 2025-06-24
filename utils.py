@@ -90,14 +90,32 @@ def to_display_time(dt) -> str:
 
 # ========== Schöne Discord-Nachrichten (UX) ==========
 
-async def send_ephemeral(interaction: discord.Interaction, text: str, emoji: str = None, color: discord.Color = None, **kwargs):
+async def send_ephemeral(
+    interaction: discord.Interaction,
+    text: str = None,
+    emoji: str = None,
+    color: discord.Color = None,
+    embed: discord.Embed = None,
+    **kwargs
+):
     color = color or discord.Color.blurple()
-    if emoji:
-        title = f"{emoji} {text}"
-    else:
-        title = text
-    embed = discord.Embed(description=title, color=color)
-    await interaction.response.send_message(embed=embed, ephemeral=True, **kwargs)
+    # Falls KEIN eigenes Embed übergeben, baue eins wie gehabt
+    if embed is None:
+        if emoji:
+            title = f"{emoji} {text or ''}"
+        else:
+            title = text or ""
+        embed = discord.Embed(description=title, color=color)
+    # WICHTIG: Verhindere Doppelübergabe von 'embed'
+    if "embed" in kwargs:
+        kwargs.pop("embed")
+    # Wenn KEIN text übergeben, lasse content leer (bzw. None)
+    await interaction.response.send_message(
+        content=None,
+        embed=embed,
+        ephemeral=True,
+        **kwargs
+    )
 
 async def send_permission_denied(interaction: discord.Interaction):
     await send_ephemeral(
