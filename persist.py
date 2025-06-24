@@ -33,6 +33,9 @@ DATA_FILES = [
     "wiki_main_channel.json",
     "setup_config.json",
     "commands_permissions.json"
+    "request_config.json",
+    "request_data.json",
+    "request_log.json"
 ]
 
 # ===== Helper =====

@@ -59,6 +59,7 @@ COGS = [
     "wiki",
     "schicht",
     "alarm",
+    "request",
 ]
 
 async def log_registered_commands():
