@@ -3,7 +3,6 @@ from discord import app_commands, Interaction
 from discord.ext import commands
 import os
 import utils
-import asyncio
 from datetime import datetime
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
@@ -23,16 +22,7 @@ class StrikeModal(discord.ui.Modal, title="Strike vergeben"):
     async def on_submit(self, interaction: Interaction):
         await self._callback(interaction, self.grund.value, self.bild.value)
 
-# ==== Buttons/Views für Strike-Liste ====
-class StrikeListView(discord.ui.View):
-    def __init__(self, strikes: dict, cog):
-        super().__init__(timeout=None)
-        self.strikes = strikes
-        self.cog = cog
-        for uid, entries in strikes.items():
-            user_id = int(uid)
-            self.add_item(StrikeDetailButton(user_id, entries))
-
+# ==== Button für Details pro User ==== 
 class StrikeDetailButton(discord.ui.Button):
     def __init__(self, user_id, entries):
         label = f"Details zu {len(entries)} Strike{'s' if len(entries) != 1 else ''}"
@@ -53,7 +43,7 @@ class StrikeDetailButton(discord.ui.Button):
             text = f"**Strikes für {user.mention if user else self.user_id}:**\n\n{desc}"
         await utils.send_ephemeral(interaction, text=text, emoji="⚠️", color=discord.Color.orange())
 
-# ==== Button für Admin-Log Details ====
+# ==== Button für Admin-Log Details ==== 
 class StrikeLogDetailButton(discord.ui.Button):
     def __init__(self, idx, entry):
         label = f"Details"
@@ -70,6 +60,24 @@ class StrikeLogDetailButton(discord.ui.Button):
             f"**Zeit:** {e['zeit']}"
         )
         await utils.send_ephemeral(interaction, text=text, emoji="🕵️", color=discord.Color.purple())
+
+# ==== Die View für die Strikeliste (mit sauberer Optik/Abtrennung) ==== 
+class StrikeListView(discord.ui.View):
+    def __init__(self, strikes: dict, guild):
+        super().__init__(timeout=None)
+        self.strikes = strikes
+        self.guild = guild
+        # Reihenfolge: für jede Person eine Zeile + Button + Trenner (außer letzte)
+        items = list(strikes.items())
+        for idx, (uid, entries) in enumerate(items):
+            user = guild.get_member(int(uid))
+            name = f"{user.mention if user else uid} = Strikes **{len(entries)}**"
+            # Label als statisches Dummy-Element (kein Button, sondern Disabled)
+            self.add_item(discord.ui.Button(label=name, style=discord.ButtonStyle.gray, disabled=True))
+            self.add_item(StrikeDetailButton(int(uid), entries))
+            # Trennlinie (außer beim letzten Eintrag)
+            if idx < len(items) - 1:
+                self.add_item(discord.ui.Button(label="―" * 28, style=discord.ButtonStyle.gray, disabled=True))
 
 class StrikeCog(commands.Cog):
     def __init__(self, bot):
@@ -124,19 +132,13 @@ class StrikeCog(commands.Cog):
             await ch.send(embed=embed)
             return
 
-        # Kompakt + Buttons
-        lines = []
-        strikes_for_buttons = {}
-        for uid, strikes in data.items():
-            user = guild.get_member(int(uid))
-            strikes_for_buttons[uid] = strikes
-            lines.append(f"{user.mention if user else uid} = Strikes **{len(strikes)}**")
+        # Strikes dict an View übergeben (Name + Button, sauber getrennt)
+        view = StrikeListView(data, guild)
         embed = discord.Embed(
             title="🛡️ Strikeliste",
-            description="\n".join(lines),
+            description="",  # Alles in der View, Embed bleibt clean
             color=discord.Color.red()
         )
-        view = StrikeListView(strikes_for_buttons, self)
         await ch.send(embed=embed, view=view)
 
     async def add_strike(self, user: discord.Member, grund, bild, by_user=None):
@@ -181,23 +183,24 @@ class StrikeCog(commands.Cog):
         log_channel = await self.get_strike_log_channel(guild)
         if not log_channel:
             return
+        # Wie gewünscht: Ein Embed pro Strike, Button direkt drunter
+        data = await self.get_strike_data()
+        anz = len(data.get(str(user.id), []))
         log_entry = {
             "from_user": by_user.mention if by_user else "-",
             "to_user": user.mention if user else "-",
             "grund": grund,
             "bild": bild,
-            "zeit": datetime.now().strftime("%Y-%m-%d %H:%M")
+            "zeit": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "anzahl": anz
         }
-        # Button für Details (pro Log-Entry)
         view = discord.ui.View()
         view.add_item(StrikeLogDetailButton(0, log_entry))
         embed = discord.Embed(
             title="📋 Strike vergeben",
             description=(
-                f"{by_user.mention if by_user else '-'} hat {user.mention if user else '-'} einen Strike gegeben!\n"
-                f"**Grund:** {grund}\n"
-                f"**Bild:** {bild or '-'}\n"
-                f"**Zeit:** {log_entry['zeit']}"
+                f"{by_user.mention if by_user else '-'} hat {user.mention if user else '-'} "
+                f"den {anz}. Strike gegeben"
             ),
             color=discord.Color.orange()
         )
