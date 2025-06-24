@@ -25,20 +25,6 @@ async def get_leads():
 async def save_leads(data):
     await utils.save_json(REQUEST_LEADS_PATH, data)
 
-def make_status_embed(data, status="active", comment=None):
-    color = {
-        "active": discord.Color.yellow(),
-        "in_progress": discord.Color.orange(),
-        "done": discord.Color.green(),
-        "rejected": discord.Color.red()
-    }[status]
-    title = f"{data['streamer']} - {'Aktiv' if status == 'active' else 'In Bearbeitung' if status=='in_progress' else 'Erledigt' if status=='done' else 'Abgelehnt'}"
-    desc = data['body']
-    embed = discord.Embed(title=title, description=desc, color=color)
-    if comment:
-        embed.add_field(name="Kommentar", value=comment, inline=False)
-    return embed
-
 class RequestCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -74,7 +60,7 @@ class RequestCog(commands.Cog):
             description="Wähle eine Option, um eine neue Anfrage zu stellen.",
             color=discord.Color.blurple()
         )
-        view = RequestMenuView(self)
+        view = RequestMenuView()
         await channel.send(embed=embed, view=view)
         await utils.send_success(interaction, f"Anfrage-Menü in {channel.mention} gepostet!")
 
@@ -123,126 +109,13 @@ class RequestCog(commands.Cog):
             await save_leads(leads)
         await utils.send_success(interaction, f"{user.mention} wurde als AI-Lead entfernt.")
 
-    # ========== POST-SYSTEM MIT STATUS ==========
-    async def post_request(self, interaction, data, typ):
-        config = await get_request_config()
-        forum_id = config.get("active_forum")
-        done_forum_id = config.get("done_forum")
-        if not forum_id:
-            return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
-        forum = interaction.guild.get_channel(forum_id)
-        done_forum = interaction.guild.get_channel(done_forum_id) if done_forum_id else None
-
-        embed = make_status_embed(data, "active")
-        post = await forum.create_thread(
-            name=data["streamer"][:MAX_TITLE_LEN],
-            content=None,
-        )
-        msg = await post.send(embed=embed, view=CloseRequestView(self, post, data, done_forum))
-        data["body"] = embed.description
-
-        # LEAD DMs mit Button
-        leads = await get_leads()
-        key = "custom" if typ == "custom" else "ai"
-        for uid in leads[key]:
-            lead = interaction.guild.get_member(uid)
-            if lead:
-                try:
-                    await lead.send(
-                        f"Neue **{'Custom' if typ=='custom' else 'AI Voice'} Anfrage** von {interaction.user.mention}:\n\n{embed.description}\n\n[Zum Thread]({post.jump_url})",
-                        embed=embed,
-                        view=LeadActionView(self, post, data, interaction.user, done_forum)
-                    )
-                except Exception:
-                    pass
-
-        await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
-
-    async def change_status(self, post, data, status, user, done_forum, comment=None):
-        embed = make_status_embed(data, status, comment=comment)
-        msgs = [m async for m in post.history(limit=10)]
-        if msgs:
-            await msgs[0].edit(embed=embed)
-        if status in ["done", "rejected"] and done_forum:
-            new_post = await done_forum.create_thread(
-                name=data["streamer"][:MAX_TITLE_LEN],
-                content=None,
-            )
-            await new_post.send(embed=embed)
-            await post.edit(archived=True, locked=True)
-        if user:
-            try:
-                await user.send(
-                    f"Status deiner Anfrage **{data['streamer']}**: {'Erledigt' if status=='done' else 'Abgelehnt' if status=='rejected' else 'In Bearbeitung'}\n{f'Kommentar: {comment}' if comment else ''}"
-                )
-            except Exception:
-                pass
-
-class CloseRequestView(discord.ui.View):
-    def __init__(self, cog, post, data, done_forum):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.post = post
-        self.data = data
-        self.done_forum = done_forum
-
-    @discord.ui.button(label="Anfrage schließen", style=discord.ButtonStyle.grey, emoji="📦")
-    async def close(self, interaction: Interaction, button: discord.ui.Button):
-        await self.cog.change_status(self.post, self.data, "done", None, self.done_forum)
-        await utils.send_success(interaction, "Anfrage wurde geschlossen und nach Done verschoben.")
-
-class LeadActionView(discord.ui.View):
-    def __init__(self, cog, post, data, anfrager, done_forum):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.post = post
-        self.data = data
-        self.anfrager = anfrager
-        self.done_forum = done_forum
-
-    @discord.ui.button(label="✅ Genehmigen", style=discord.ButtonStyle.green)
-    async def accept(self, interaction: Interaction, button: discord.ui.Button):
-        await self.cog.change_status(self.post, self.data, "done", self.anfrager, self.done_forum)
-        await utils.send_success(interaction, "Genehmigt & nach Done verschoben.")
-
-    @discord.ui.button(label="🟡 In Bearbeitung", style=discord.ButtonStyle.blurple)
-    async def progress(self, interaction: Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(StatusModal(self.cog, self.post, self.data, self.anfrager, self.done_forum, "in_progress"))
-
-    @discord.ui.button(label="❌ Ablehnen", style=discord.ButtonStyle.red)
-    async def reject(self, interaction: Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(StatusModal(self.cog, self.post, self.data, self.anfrager, self.done_forum, "rejected"))
-
-class StatusModal(discord.ui.Modal, title="Status ändern"):
-    def __init__(self, cog, post, data, anfrager, done_forum, status):
-        super().__init__()
-        self.cog = cog
-        self.post = post
-        self.data = data
-        self.anfrager = anfrager
-        self.done_forum = done_forum
-        self.status = status
-        self.comment = discord.ui.TextInput(
-            label="Kommentar/Begründung (max 200 Zeichen)",
-            style=discord.TextStyle.paragraph,
-            max_length=MAX_COMMENT_LEN,
-            required=True
-        )
-        self.add_item(self.comment)
-
-    async def on_submit(self, interaction: Interaction):
-        await self.cog.change_status(self.post, self.data, self.status, self.anfrager, self.done_forum, self.comment.value)
-        await utils.send_success(interaction, "Status & Kommentar gespeichert.")
-
 class RequestMenuView(discord.ui.View):
-    def __init__(self, cog):
+    def __init__(self):
         super().__init__(timeout=None)
-        self.cog = cog
-        self.add_item(RequestTypeDropdown(self.cog))
+        self.add_item(RequestTypeDropdown())
 
 class RequestTypeDropdown(discord.ui.Select):
-    def __init__(self, cog):
-        self.cog = cog
+    def __init__(self):
         options = [
             discord.SelectOption(label="Custom Anfrage", value="custom", description="Stelle eine individuelle Anfrage"),
             discord.SelectOption(label="AI Voice Anfrage", value="ai", description="AI Voice Custom anfragen"),
@@ -250,60 +123,94 @@ class RequestTypeDropdown(discord.ui.Select):
         super().__init__(placeholder="Wähle eine Anfrage-Art…", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: Interaction):
+        # Show Modal je nach Anfrage-Typ
         if self.values[0] == "custom":
-            await interaction.response.send_modal(CustomRequestModal(self.cog))
+            await interaction.response.send_modal(CustomRequestModal())
         elif self.values[0] == "ai":
-            await interaction.response.send_modal(AIRequestModal(self.cog))
+            await interaction.response.send_modal(AIRequestModal())
+
+# ========== Modals ==========
 
 class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
-    def __init__(self, cog):
-        super().__init__()
-        self.cog = cog
-        self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
-        self.preis = discord.ui.TextInput(label="Preis (z. B. 400€)", max_length=20, required=True)
-        self.bezahlt = discord.ui.TextInput(label="Bezahlt?", placeholder="Ja/Nein", max_length=10, required=True)
-        self.anfrage = discord.ui.TextInput(label="Anfrage", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN, required=True)
-        self.zeitgrenze = discord.ui.TextInput(label="Zeitgrenze (z. B. bis Sonntag)", max_length=40, required=True)
-        self.add_item(self.streamer)
-        self.add_item(self.preis)
-        self.add_item(self.bezahlt)
-        self.add_item(self.anfrage)
-        self.add_item(self.zeitgrenze)
+    streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
+    preis = discord.ui.TextInput(label="Preis (z. B. 400€)", max_length=20, required=True)
+    bezahlt = discord.ui.TextInput(label="Bezahlt?", placeholder="Ja/Nein", max_length=10, required=True)
+    anfrage = discord.ui.TextInput(label="Anfrage", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN, required=True)
+    zeitgrenze = discord.ui.TextInput(label="Zeitgrenze (z. B. bis Sonntag)", max_length=40, required=True)
 
     async def on_submit(self, interaction: Interaction):
-        data = {
-            "streamer": self.streamer.value,
-            "body": (
-                f"**Streamer:** {self.streamer.value}\n"
-                f"**Preis:** {self.preis.value}\n"
-                f"**Bezahlt?** {self.bezahlt.value}\n"
-                f"**Anfrage:** {self.anfrage.value}\n"
-                f"**Zeitgrenze:** {self.zeitgrenze.value}"
-            ),
-        }
-        await self.cog.post_request(interaction, data, "custom")
+        config = await get_request_config()
+        forum_id = config.get("active_forum")
+        if not forum_id:
+            return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
+        forum = interaction.guild.get_channel(forum_id)
+        # Thread/Post erstellen im Forum
+        title = f"{self.streamer.value[:MAX_TITLE_LEN]}"
+        body = (
+            f"**Streamer:** {self.streamer.value}\n"
+            f"**Preis:** {self.preis.value}\n"
+            f"**Bezahlt?** {self.bezahlt.value}\n"
+            f"**Anfrage:** {self.anfrage.value}\n"
+            f"**Zeitgrenze:** {self.zeitgrenze.value}"
+        )
+        # ==== FIX: content=body (vorher fehlte content oder war None!) ====
+        thread = await forum.create_thread(
+            name=title,
+            content=body,    # <--- FIX HIER!
+            applied_tags=[],
+        )
+        # Leads pingen (DM)
+        leads = await get_leads()
+        mentions = [interaction.guild.get_member(uid).mention for uid in leads["custom"] if interaction.guild.get_member(uid)]
+        if mentions:
+            for uid in leads["custom"]:
+                lead = interaction.guild.get_member(uid)
+                if lead:
+                    try:
+                        await lead.send(
+                            f"Neue **Custom Anfrage** von {interaction.user.mention}:\n\n{body}\n\n"
+                            f"[Zum Thread]({thread.jump_url})"
+                        )
+                    except Exception:
+                        pass
+        await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
 
 class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage"):
-    def __init__(self, cog):
-        super().__init__()
-        self.cog = cog
-        self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
-        self.audiowunsch = discord.ui.TextInput(label="Audio Wunsch", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN, required=True)
-        self.zeitgrenze = discord.ui.TextInput(label="Zeitgrenze", max_length=40, required=True)
-        self.add_item(self.streamer)
-        self.add_item(self.audiowunsch)
-        self.add_item(self.zeitgrenze)
+    streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
+    audiowunsch = discord.ui.TextInput(label="Audio Wunsch", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN, required=True)
+    zeitgrenze = discord.ui.TextInput(label="Zeitgrenze", max_length=40, required=True)
 
     async def on_submit(self, interaction: Interaction):
-        data = {
-            "streamer": self.streamer.value,
-            "body": (
-                f"**Streamer:** {self.streamer.value}\n"
-                f"**Audio Wunsch:** {self.audiowunsch.value}\n"
-                f"**Zeitgrenze:** {self.zeitgrenze.value}"
-            ),
-        }
-        await self.cog.post_request(interaction, data, "ai")
+        config = await get_request_config()
+        forum_id = config.get("active_forum")
+        if not forum_id:
+            return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
+        forum = interaction.guild.get_channel(forum_id)
+        title = f"{self.streamer.value[:MAX_TITLE_LEN]}"
+        body = (
+            f"**Streamer:** {self.streamer.value}\n"
+            f"**Audio Wunsch:** {self.audiowunsch.value}\n"
+            f"**Zeitgrenze:** {self.zeitgrenze.value}"
+        )
+        # ==== FIX: content=body ====
+        thread = await forum.create_thread(
+            name=title,
+            content=body,     # <--- FIX HIER!
+            applied_tags=[],
+        )
+        leads = await get_leads()
+        if leads["ai"]:
+            for uid in leads["ai"]:
+                lead = interaction.guild.get_member(uid)
+                if lead:
+                    try:
+                        await lead.send(
+                            f"Neue **AI Voice Anfrage** von {interaction.user.mention}:\n\n{body}\n\n"
+                            f"[Zum Thread]({thread.jump_url})"
+                        )
+                    except Exception:
+                        pass
+        await utils.send_success(interaction, "Deine AI Voice Anfrage wurde erstellt!")
 
 # ========== Setup ==========
 async def setup(bot):
