@@ -1,6 +1,4 @@
-﻿# schicht.py
-
-import discord
+﻿import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -18,20 +16,24 @@ class SchichtCog(commands.Cog):
     # ===== Helper =====
 
     async def get_config(self):
-        return await utils.load_json(SCHICHT_CONFIG_PATH, {
-            "roles": [],
-            "voice_channel_id": None,
-            "log_channel_id": None,
-            "schicht_group": []
-        })
+        cfg = await utils.load_json(SCHICHT_CONFIG_PATH, {})
+        # Sicherstellen, dass alle Keys da sind!
+        if "roles" not in cfg:
+            cfg["roles"] = []
+        if "voice_channel_id" not in cfg:
+            cfg["voice_channel_id"] = None
+        if "log_channel_id" not in cfg:
+            cfg["log_channel_id"] = None
+        if "schicht_group" not in cfg:
+            cfg["schicht_group"] = []
+        return cfg
 
     async def save_config(self, config):
         await utils.save_json(SCHICHT_CONFIG_PATH, config)
 
     async def is_allowed(self, member: discord.Member):
-        # Prüft ob Member eine Schichtrolle hat oder Admin ist
         cfg = await self.get_config()
-        return utils.is_admin(member) or utils.has_any_role(member, cfg["roles"])
+        return utils.is_admin(member) or utils.has_any_role(member, cfg.get("roles", []))
 
     async def is_in_group(self, user_id: int):
         cfg = await self.get_config()
@@ -50,7 +52,6 @@ class SchichtCog(commands.Cog):
         return None
 
     async def get_temp_voice_category(self, guild):
-        """Kategorie des Zielkanals, falls temporäre Channels dort angelegt werden sollen"""
         channel = await self.get_voice_channel(guild)
         return channel.category if channel else None
 
@@ -117,7 +118,6 @@ class SchichtCog(commands.Cog):
             # Ziel-User ist online & im Voice → beide moven!
             temp_cat = await self.get_temp_voice_category(guild)
             name = f"Schichtübergabe-{initiator.name}-{user.name}"
-            # Temporären VoiceChannel anlegen
             overwrites = {
                 guild.default_role: discord.PermissionOverwrite(connect=False),
                 initiator: discord.PermissionOverwrite(connect=True),
@@ -129,7 +129,6 @@ class SchichtCog(commands.Cog):
                 overwrites=overwrites,
                 category=temp_cat
             )
-            # Beide moven (nacheinander, damit Discord keine Fehler schmeißt)
             try:
                 await initiator.move_to(temp_voice)
                 await asyncio.sleep(0.3)
@@ -144,14 +143,13 @@ class SchichtCog(commands.Cog):
                 guild,
                 f"**Schichtübergabe:** {initiator.mention} → {user.mention} | `{discord.utils.format_dt(discord.utils.utcnow(), 'f')}`"
             )
-            # Optional: Channel nach Übergabe irgendwann automatisch löschen
-            await asyncio.sleep(60*15)  # 15 Minuten
+            # Channel nach 15 Min löschen
+            await asyncio.sleep(60*15)
             try:
                 await temp_voice.delete()
             except Exception:
                 pass
         else:
-            # Ziel-User ist nicht online/im Voice
             try:
                 await user.send(f"👮‍♂️ **Schichtübergabe:** {initiator.mention} möchte mit dir eine Schichtübergabe durchführen.\nBitte komme schnellstmöglich in Discord und gehe in einen Voice-Channel!")
                 await utils.send_success(interaction, f"User nicht online/im Voice, wurde per DM benachrichtigt.")
@@ -171,7 +169,7 @@ class SchichtCog(commands.Cog):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await self.get_config()
-        if role.id not in cfg["roles"]:
+        if role.id not in cfg.get("roles", []):
             cfg["roles"].append(role.id)
             await self.save_config(cfg)
         await utils.send_success(interaction, f"Rolle {role.mention} darf nun Schichtübergaben durchführen.")
@@ -185,7 +183,7 @@ class SchichtCog(commands.Cog):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await self.get_config()
-        if role.id in cfg["roles"]:
+        if role.id in cfg.get("roles", []):
             cfg["roles"].remove(role.id)
             await self.save_config(cfg)
         await utils.send_success(interaction, f"Rolle {role.mention} entfernt.")
@@ -275,7 +273,6 @@ class SchichtCog(commands.Cog):
 
     # ===== Menu-Refresh für SetupBot =====
     async def reload_menu(self, channel_id):
-        """Für setupbot.py: postet das Panel neu."""
         guild = self.bot.get_guild(GUILD_ID)
         channel = guild.get_channel(channel_id)
         if channel:

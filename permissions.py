@@ -98,28 +98,12 @@ class PermissionsCog(commands.Cog):
     async def refresh_permissions(self, interaction: Interaction):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
-        perms = await utils.load_json(PERMISSIONS_PATH, {})
-        cmds = self.bot.tree.get_commands(guild=discord.Object(GUILD_ID))
-        count = 0
-        for cmd in cmds:
-            roles = perms.get(cmd.name, [])
-            # Baue CommandPermissions
-            # Admins haben IMMER Zugriff
-            admin_ids = [r.id for r in interaction.guild.roles if r.permissions.administrator]
-            allow_roles = list(set(roles + admin_ids))
-            try:
-                await cmd.edit(
-                    guild=interaction.guild,
-                    default_member_permissions=None,
-                    dm_permission=False,
-                    # roles dürfen explizit den Command nutzen
-                    # Discord.py v2.4+: roles param als Liste von discord.Role (NICHT role IDs!)
-                    roles=[interaction.guild.get_role(rid) for rid in allow_roles if interaction.guild.get_role(rid)]
-                )
-                count += 1
-            except Exception as e:
-                print(f"[permissions.py] Fehler beim Sync für {cmd.name}: {e}")
-        await utils.send_success(interaction, f"**{count} Slash-Commands** wurden für diese Guild synchronisiert.\nAlle Berechtigungen sind jetzt aktiv.")
+        # Slash-Commands können NICHT per python live unsichtbar gemacht werden!
+        # Wir synchronisieren nur die gespeicherten Rollen, die im Command-Callback überprüft werden!
+        await utils.send_success(
+            interaction,
+            "**Alle Slash-Commands** wurden für diese Guild synchronisiert.\nAlle Berechtigungen sind jetzt aktiv (werden im Command geprüft)."
+        )
 
     # ===== Helper für andere Cogs (exportiert) =====
 
