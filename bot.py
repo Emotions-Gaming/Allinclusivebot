@@ -97,18 +97,17 @@ async def on_ready():
         except Exception as e:
             log_error(f"Fehler beim Laden von Extension {cog}: {e}")
 
-    # Slash-Commands NUR für Guild syncen
+    # WICHTIG: Erst jetzt syncen!
     try:
-        bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
+        # NICHT: bot.tree.clear_commands(...)
         await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
         log_success("Slash-Commands neu für Guild registriert!")
     except Exception as e:
         log_error(f"Fehler beim SlashCommand-Sync: {e}")
 
-    # Nach dem Sync: Liste ALLE Commands (guild und global)
     await log_registered_commands()
-
     log_success(f"BOT ONLINE: {bot.user} ({bot.user.id}) – Alle Systeme bereit!\n")
+
 
 @bot.tree.error
 async def on_app_command_error(interaction, error):
