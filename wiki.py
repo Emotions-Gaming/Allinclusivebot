@@ -7,7 +7,6 @@ import os
 import utils
 from datetime import datetime
 
-
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
 MY_GUILD = discord.Object(id=GUILD_ID)
 WIKI_PAGES_PATH = os.path.join("persistent_data", "wiki_pages.json")
@@ -15,8 +14,10 @@ WIKI_BACKUP_PATH = os.path.join("persistent_data", "wiki_backup.json")
 WIKI_MAIN_CHANNEL_PATH = os.path.join("persistent_data", "wiki_main_channel.json")
 
 MAX_DROPDOWN = 25
+DISCORD_MAX_LEN = 2000
 
 # ========== Helper ==========
+
 async def get_pages():
     return await utils.load_json(WIKI_PAGES_PATH, {})
 
@@ -55,13 +56,18 @@ class WikiDropdown(discord.ui.Select):
         self.pages = pages
 
     async def callback(self, interaction: Interaction):
-        page = self.pages.get(self.values[0])
-        embed = discord.Embed(
-            title=f"📖 {self.values[0]}",
-            description=page if page else "_Kein Inhalt gefunden._",
-            color=discord.Color.blurple()
-        )
-        await utils.send_ephemeral(interaction, embed=embed)
+        page_title = self.values[0]
+        page = self.pages.get(page_title)
+        # Teilt den Text falls nötig in mehrere Nachrichten auf
+        page_chunks = chunk_text(page if page else "_Kein Inhalt gefunden._", size=1800)
+        for idx, chunk in enumerate(page_chunks):
+            embed = discord.Embed(
+                title=f"📖 {page_title}" if idx == 0 else f"📖 {page_title} (Teil {idx+1})",
+                description=chunk,
+                color=discord.Color.blurple()
+            )
+            # Dummy-Text für send_ephemeral (da text Pflicht)
+            await utils.send_ephemeral(interaction, text=" ", embed=embed)
 
 # ========== Slash Commands ==========
 
@@ -137,7 +143,6 @@ class WikiCog(commands.Cog):
             pass
         await self.reload_menu()
         await utils.send_success(interaction, f"Wikiseite **{title}** gesichert!")
-        # Channel nach Sicherung löschen? -> Optional. Hier: Nicht automatisch!
 
     @app_commands.command(
         name="wiki_delete",
@@ -195,23 +200,17 @@ class WikiDeleteView(discord.ui.View):
         super().__init__(timeout=60)
         self.cog = cog
         self.pages = None
-
-        # Dynamisch initialisieren
         self.add_item(WikiDeleteDropdown(self))
 
 class WikiDeleteDropdown(discord.ui.Select):
     def __init__(self, parent):
-        pages = discord.utils.get(self.cog.bot.cogs, name="WikiCog")
         self.parent = parent
-        # Get pages for dropdown
         self.page_data = None
-        # HACK: use sync function for dropdown init
         self.options = []
         self.init_options()
         super().__init__(placeholder="Seite auswählen…", options=self.options, min_values=1, max_values=1)
 
     def init_options(self):
-        # Kann im __init__ nicht awaiten, daher hier sync laden!
         pages = utils.load_json_sync(WIKI_PAGES_PATH, {})
         self.page_data = pages
         for title in list(pages.keys())[:MAX_DROPDOWN]:
