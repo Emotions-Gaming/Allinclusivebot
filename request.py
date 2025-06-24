@@ -1,4 +1,6 @@
-﻿import discord
+﻿# request.py
+
+import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -7,498 +9,338 @@ from datetime import datetime
 
 GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
 MY_GUILD = discord.Object(id=GUILD_ID)
-
 REQUEST_CONFIG_PATH = os.path.join("persistent_data", "request_config.json")
-REQUEST_DATA_PATH = os.path.join("persistent_data", "request_data.json")
 REQUEST_LOG_PATH = os.path.join("persistent_data", "request_log.json")
 
-MAX_TITLE_LEN = 50
-MAX_FIELD_LEN = 500
-MAX_COMMENT_LEN = 200
+COLOR_NEW = discord.Color.blurple()
+COLOR_ACCEPTED = discord.Color.green()
+COLOR_DECLINED = discord.Color.red()
+COLOR_WORKING = discord.Color.gold()
 
-# ====================
-# Hilfsfunktionen JSON
-# ====================
+# ========== Hilfsfunktionen (persistente Daten) ==========
+
 async def get_config():
-    return await utils.load_json(REQUEST_CONFIG_PATH, {})
+    return await utils.load_json(REQUEST_CONFIG_PATH, {
+        "aktiv_id": None,
+        "done_id": None,
+        "log_id": None,
+        "custom_leads": [],
+        "ai_leads": []
+    })
 
-async def save_config(data):
-    await utils.save_json(REQUEST_CONFIG_PATH, data)
-
-async def get_data():
-    return await utils.load_json(REQUEST_DATA_PATH, {})
-
-async def save_data(data):
-    await utils.save_json(REQUEST_DATA_PATH, data)
+async def save_config(cfg):
+    await utils.save_json(REQUEST_CONFIG_PATH, cfg)
 
 async def get_log():
     return await utils.load_json(REQUEST_LOG_PATH, {})
 
-async def save_log(data):
-    await utils.save_json(REQUEST_LOG_PATH, data)
+async def save_log(log):
+    await utils.save_json(REQUEST_LOG_PATH, log)
 
-def nowstr():
-    return datetime.now().strftime("%d.%m.%Y %H:%M")
+# ========== Buttons & Modals für DM ==========
 
-# ====================
-# Request-Menü
-# ====================
-
-class RequestTypeSelect(discord.ui.Select):
-    def __init__(self, cog):
-        options = [
-            discord.SelectOption(label="Custom-Anfrage", description="Individuelle Anfrage (Text, Video, Custom-Auftrag)", emoji="🎨", value="custom"),
-            discord.SelectOption(label="AI Voice Anfrage", description="Künstliche Voice-Generierung (Anna/Xenia)", emoji="🗣️", value="aivoice"),
-        ]
-        super().__init__(placeholder="Wähle den Anfrage-Typ...", min_values=1, max_values=1, options=options)
-        self.cog = cog
-
-    async def callback(self, interaction: Interaction):
-        if self.values[0] == "custom":
-            await interaction.response.send_modal(CustomRequestModal(self.cog))
-        else:
-            await interaction.response.send_modal(AIVoiceRequestModal(self.cog))
-
-class RequestMenuView(discord.ui.View):
-    def __init__(self, cog):
-        super().__init__(timeout=None)
-        self.add_item(RequestTypeSelect(cog))
-
-# ====================
-# Custom Modal
-# ====================
-
-class CustomRequestModal(discord.ui.Modal, title="Neue Custom-Anfrage"):
-    def __init__(self, cog):
-        super().__init__()
-        self.cog = cog
-        self.streamer = discord.ui.TextInput(
-            label="Streamer",
-            max_length=MAX_TITLE_LEN,
-            required=True,
-            placeholder="Name des Streamers"
-        )
-        self.preis = discord.ui.TextInput(
-            label="Preis ($)",
-            max_length=MAX_FIELD_LEN,
-            required=True,
-            placeholder="Wie viel gibt der Kunde?"
-        )
-        self.bezahlt = discord.ui.TextInput(
-            label="Bezahlt?",
-            max_length=20,
-            required=True,
-            placeholder="Ja/Nein"
-        )
-        self.anfrage = discord.ui.TextInput(
-            label="Anfrage",
-            style=discord.TextStyle.paragraph,
-            max_length=MAX_FIELD_LEN,
-            required=True,
-            placeholder="Was soll gemacht werden?"
-        )
-        self.zeitgrenze = discord.ui.TextInput(
-            label="Zeitgrenze",
-            max_length=MAX_FIELD_LEN,
-            required=True,
-            placeholder="Bis wann wird es benötigt?"
-        )
-        self.add_item(self.streamer)
-        self.add_item(self.preis)
-        self.add_item(self.bezahlt)
-        self.add_item(self.anfrage)
-        self.add_item(self.zeitgrenze)
-
-    async def on_submit(self, interaction: Interaction):
-        await self.cog.create_request(
-            interaction=interaction,
-            typ="custom",
-            streamer=self.streamer.value,
-            preis=self.preis.value,
-            bezahlt=self.bezahlt.value,
-            anfrage=self.anfrage.value,
-            zeitgrenze=self.zeitgrenze.value
-        )
-
-# ====================
-# AI Voice Modal
-# ====================
-
-class AIVoiceRequestModal(discord.ui.Modal, title="Neue AI Voice-Anfrage"):
-    def __init__(self, cog):
-        super().__init__()
-        self.cog = cog
-        self.streamer = discord.ui.TextInput(
-            label="Streamer",
-            max_length=MAX_TITLE_LEN,
-            required=True,
-            placeholder="Name (z.B. Xenia, Anna)"
-        )
-        self.audiowunsch = discord.ui.TextInput(
-            label="Audio-Wunsch",
-            style=discord.TextStyle.paragraph,
-            max_length=MAX_FIELD_LEN,
-            required=True,
-            placeholder="Was soll gesagt werden?"
-        )
-        self.zeitgrenze = discord.ui.TextInput(
-            label="Zeitgrenze",
-            max_length=MAX_FIELD_LEN,
-            required=True,
-            placeholder="Bis wann wird es benötigt?"
-        )
-        self.add_item(self.streamer)
-        self.add_item(self.audiowunsch)
-        self.add_item(self.zeitgrenze)
-
-    async def on_submit(self, interaction: Interaction):
-        await self.cog.create_request(
-            interaction=interaction,
-            typ="aivoice",
-            streamer=self.streamer.value,
-            audiowunsch=self.audiowunsch.value,
-            zeitgrenze=self.zeitgrenze.value
-        )
-
-# ====================
-# POST & Status Embeds
-# ====================
-
-def make_embed(data, status="active"):
-    color = {
-        "active": discord.Color.blurple(),
-        "bearbeitet": discord.Color.yellow(),
-        "abgelehnt": discord.Color.red(),
-        "done": discord.Color.green(),
-    }.get(status, discord.Color.default())
-    title = data["streamer"][:MAX_TITLE_LEN]
-    fields = []
-    if data["typ"] == "custom":
-        fields = [
-            ("Preis", data.get("preis", "-")),
-            ("Bezahlt?", data.get("bezahlt", "-")),
-            ("Anfrage", data.get("anfrage", "-")),
-            ("Zeitgrenze", data.get("zeitgrenze", "-")),
-        ]
-    else:
-        fields = [
-            ("Audio-Wunsch", data.get("audiowunsch", "-")),
-            ("Zeitgrenze", data.get("zeitgrenze", "-")),
-        ]
-    embed = discord.Embed(
-        title=title,
-        description=f"Typ: **{'Custom' if data['typ']=='custom' else 'AI Voice'}**\nStatus: **{status.capitalize()}**\nErstellt von: <@{data['user_id']}>",
-        color=color,
-        timestamp=datetime.now()
-    )
-    for name, value in fields:
-        embed.add_field(name=name, value=value[:MAX_FIELD_LEN], inline=False)
-    if "kommentar" in data and data["kommentar"]:
-        embed.add_field(name="Kommentar/Status", value=data["kommentar"][:MAX_COMMENT_LEN], inline=False)
-    return embed
-
-class CloseRequestView(discord.ui.View):
-    def __init__(self, cog, req_id):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.req_id = req_id
-
-    @discord.ui.button(label="Anfrage schließen", style=discord.ButtonStyle.red, emoji="🗑️")
-    async def close_btn(self, interaction: Interaction, button: discord.ui.Button):
-        await self.cog.close_request(interaction, self.req_id)
-
-# ========== DM Decision View ==========
-class LeadDecisionView(discord.ui.View):
-    def __init__(self, cog, req_id):
+class DecisionView(discord.ui.View):
+    def __init__(self, post_id, decision_callback):
         super().__init__(timeout=300)
-        self.cog = cog
-        self.req_id = req_id
+        self.post_id = post_id
+        self.decision_callback = decision_callback
 
     @discord.ui.button(label="✅ Ja, wird gemacht", style=discord.ButtonStyle.green)
-    async def yes_btn(self, interaction: Interaction, button: discord.ui.Button):
-        await self.cog.update_request_status(interaction, self.req_id, "done", kommentar=None)
+    async def accept_btn(self, interaction: Interaction, button: discord.ui.Button):
+        await self.decision_callback(interaction, self.post_id, "accepted")
 
-    @discord.ui.button(label="⚠️ Wird bearbeitet", style=discord.ButtonStyle.blurple)
-    async def bearbeitet_btn(self, interaction: Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(DecisionCommentModal(self.cog, self.req_id, "bearbeitet"))
+    @discord.ui.button(label="🟡 Wird bearbeitet", style=discord.ButtonStyle.primary)
+    async def work_btn(self, interaction: Interaction, button: discord.ui.Button):
+        modal = WorkModal(self.post_id, self.decision_callback)
+        await interaction.response.send_modal(modal)
 
     @discord.ui.button(label="❌ Ablehnen", style=discord.ButtonStyle.red)
-    async def abgelehnt_btn(self, interaction: Interaction, button: discord.ui.Button):
-        await interaction.response.send_modal(DecisionCommentModal(self.cog, self.req_id, "abgelehnt"))
+    async def decline_btn(self, interaction: Interaction, button: discord.ui.Button):
+        modal = DeclineModal(self.post_id, self.decision_callback)
+        await interaction.response.send_modal(modal)
 
-class DecisionCommentModal(discord.ui.Modal, title="Kommentar eingeben"):
-    def __init__(self, cog, req_id, status):
+class WorkModal(discord.ui.Modal, title="Wird bearbeitet – Info"):
+    def __init__(self, post_id, decision_callback):
         super().__init__()
-        self.cog = cog
-        self.req_id = req_id
-        self.status = status
-        self.kommentar = discord.ui.TextInput(
-            label="Kommentar/Grund",
+        self.post_id = post_id
+        self.decision_callback = decision_callback
+        self.work_input = discord.ui.TextInput(
+            label="Was wird gemacht?",
             style=discord.TextStyle.paragraph,
-            max_length=MAX_COMMENT_LEN,
-            required=True,
-            placeholder="Kommentar/Grund (max 200 Zeichen)"
+            max_length=200,
+            required=True
         )
-        self.add_item(self.kommentar)
+        self.add_item(self.work_input)
 
     async def on_submit(self, interaction: Interaction):
-        await self.cog.update_request_status(
-            interaction, self.req_id, self.status, kommentar=self.kommentar.value
-        )
+        await self.decision_callback(interaction, self.post_id, "working", self.work_input.value)
 
-# ====================
-# Main Cog
-# ====================
+class DeclineModal(discord.ui.Modal, title="Ablehnen – Grund angeben"):
+    def __init__(self, post_id, decision_callback):
+        super().__init__()
+        self.post_id = post_id
+        self.decision_callback = decision_callback
+        self.reason_input = discord.ui.TextInput(
+            label="Grund für Ablehnung",
+            style=discord.TextStyle.paragraph,
+            max_length=200,
+            required=True
+        )
+        self.add_item(self.reason_input)
+
+    async def on_submit(self, interaction: Interaction):
+        await self.decision_callback(interaction, self.post_id, "declined", self.reason_input.value)
+
+# ========== Main Cog ==========
 
 class RequestCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # ========= Admin Commands =========
+    # ========== SETUP KOMMANDOS ==========
 
-    @app_commands.command(name="requestmain", description="Postet das Anfrage-Panel.")
+    @app_commands.command(name="requestsetaktiv", description="Setzt den Forum-Kanal für 'Aktiv'.")
     @app_commands.guilds(MY_GUILD)
-    async def requestmain(self, interaction: Interaction, channel: discord.TextChannel):
+    async def set_aktiv(self, interaction: Interaction, channel: discord.ForumChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        cfg["main_channel_id"] = channel.id
+        cfg["aktiv_id"] = channel.id
         await save_config(cfg)
-        embed = discord.Embed(
-            title="📝 Anfrage-System",
-            description="Wähle unten eine Kategorie, um eine Anfrage zu erstellen.",
-            color=discord.Color.blurple()
-        )
-        view = RequestMenuView(self)
-        await channel.send(embed=embed, view=view)
-        await utils.send_success(interaction, f"Menü gepostet in {channel.mention}!")
+        await utils.send_success(interaction, f"'Aktiv'-Forum-Kanal gesetzt: {channel.mention}")
 
-    @app_commands.command(name="requestaktiv", description="Setzt den Channel für aktive Requests.")
+    @app_commands.command(name="requestsetdone", description="Setzt den Forum-Kanal für 'Done'.")
     @app_commands.guilds(MY_GUILD)
-    async def requestaktiv(self, interaction: Interaction, channel: discord.TextChannel):
+    async def set_done(self, interaction: Interaction, channel: discord.ForumChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        cfg["aktiv_channel_id"] = channel.id
+        cfg["done_id"] = channel.id
         await save_config(cfg)
-        await utils.send_success(interaction, f"Aktiv-Channel gesetzt: {channel.mention}")
+        await utils.send_success(interaction, f"'Done'-Forum-Kanal gesetzt: {channel.mention}")
 
-    @app_commands.command(name="requestdone", description="Setzt den Channel für erledigte Requests.")
+    @app_commands.command(name="requestsetlog", description="Setzt den Log-Kanal.")
     @app_commands.guilds(MY_GUILD)
-    async def requestdone(self, interaction: Interaction, channel: discord.TextChannel):
+    async def set_log(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        cfg["done_channel_id"] = channel.id
+        cfg["log_id"] = channel.id
         await save_config(cfg)
-        await utils.send_success(interaction, f"Done-Channel gesetzt: {channel.mention}")
+        await utils.send_success(interaction, f"Log-Kanal gesetzt: {channel.mention}")
 
-    @app_commands.command(name="requestlog", description="Setzt den Logchannel für Anfragen.")
+    @app_commands.command(name="requestcustomlead", description="Fügt einen User als Custom-Lead hinzu.")
     @app_commands.guilds(MY_GUILD)
-    async def requestlog(self, interaction: Interaction, channel: discord.TextChannel):
+    async def custom_lead(self, interaction: Interaction, user: discord.User):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        cfg["log_channel_id"] = channel.id
+        if user.id not in cfg["custom_leads"]:
+            cfg["custom_leads"].append(user.id)
         await save_config(cfg)
-        await utils.send_success(interaction, f"Logchannel gesetzt: {channel.mention}")
+        await utils.send_success(interaction, f"{user.mention} ist jetzt Custom-Lead.")
 
-    @app_commands.command(name="requestcustomlead", description="Fügt einen Custom-Lead hinzu.")
+    @app_commands.command(name="requestcustomremovelead", description="Entfernt einen User als Custom-Lead.")
     @app_commands.guilds(MY_GUILD)
-    async def requestcustomlead(self, interaction: Interaction, user: discord.Member):
+    async def custom_remove_lead(self, interaction: Interaction, user: discord.User):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        leads = set(cfg.get("custom_leads", []))
-        leads.add(user.id)
-        cfg["custom_leads"] = list(leads)
+        if user.id in cfg["custom_leads"]:
+            cfg["custom_leads"].remove(user.id)
         await save_config(cfg)
-        await utils.send_success(interaction, f"{user.mention} als Custom-Lead hinzugefügt.")
+        await utils.send_success(interaction, f"{user.mention} ist kein Custom-Lead mehr.")
 
-    @app_commands.command(name="requestcustomremovelead", description="Entfernt einen Custom-Lead.")
+    @app_commands.command(name="requestailead", description="Fügt einen User als AI-Lead hinzu.")
     @app_commands.guilds(MY_GUILD)
-    async def requestcustomremovelead(self, interaction: Interaction, user: discord.Member):
+    async def ai_lead(self, interaction: Interaction, user: discord.User):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        leads = set(cfg.get("custom_leads", []))
-        if user.id in leads:
-            leads.remove(user.id)
-            cfg["custom_leads"] = list(leads)
-            await save_config(cfg)
-            await utils.send_success(interaction, f"{user.mention} als Lead entfernt.")
-        else:
-            await utils.send_error(interaction, "User war kein Lead.")
-
-    @app_commands.command(name="requestailead", description="Fügt einen AI Voice-Lead hinzu.")
-    @app_commands.guilds(MY_GUILD)
-    async def requestailead(self, interaction: Interaction, user: discord.Member):
-        if not utils.is_admin(interaction.user):
-            return await utils.send_permission_denied(interaction)
-        cfg = await get_config()
-        leads = set(cfg.get("ai_leads", []))
-        leads.add(user.id)
-        cfg["ai_leads"] = list(leads)
+        if user.id not in cfg["ai_leads"]:
+            cfg["ai_leads"].append(user.id)
         await save_config(cfg)
-        await utils.send_success(interaction, f"{user.mention} als AI Voice-Lead hinzugefügt.")
+        await utils.send_success(interaction, f"{user.mention} ist jetzt AI-Lead.")
 
-    @app_commands.command(name="requestairemovelead", description="Entfernt einen AI Voice-Lead.")
+    @app_commands.command(name="requestairemovelead", description="Entfernt einen User als AI-Lead.")
     @app_commands.guilds(MY_GUILD)
-    async def requestairemovelead(self, interaction: Interaction, user: discord.Member):
+    async def ai_remove_lead(self, interaction: Interaction, user: discord.User):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        leads = set(cfg.get("ai_leads", []))
-        if user.id in leads:
-            leads.remove(user.id)
-            cfg["ai_leads"] = list(leads)
-            await save_config(cfg)
-            await utils.send_success(interaction, f"{user.mention} als Lead entfernt.")
-        else:
-            await utils.send_error(interaction, "User war kein Lead.")
+        if user.id in cfg["ai_leads"]:
+            cfg["ai_leads"].remove(user.id)
+        await save_config(cfg)
+        await utils.send_success(interaction, f"{user.mention} ist kein AI-Lead mehr.")
 
-    # =====================
-    # Request-Handling Core
-    # =====================
+    # ========== ANFRAGE-MENÜ POSTEN ==========
 
-    async def create_request(self, interaction: Interaction, typ, **fields):
+    @app_commands.command(name="requestmain", description="Postet das Anfrage-Menü (nur Admins).")
+    @app_commands.guilds(MY_GUILD)
+    async def request_main(self, interaction: Interaction):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
         cfg = await get_config()
-        aktiv_id = cfg.get("aktiv_channel_id")
+        aktiv_id = cfg["aktiv_id"]
         if not aktiv_id:
-            return await utils.send_error(interaction, "Aktiv-Channel ist nicht gesetzt.")
-        aktiv_channel = interaction.guild.get_channel(aktiv_id)
-        if not aktiv_channel:
-            return await utils.send_error(interaction, "Aktiv-Channel existiert nicht mehr.")
-        # Daten speichern
-        data = await get_data()
-        req_id = f"{int(datetime.now().timestamp())}_{interaction.user.id}"
-        request = {
-            "id": req_id,
-            "typ": typ,
-            "status": "active",
-            "user_id": interaction.user.id,
-            "streamer": fields.get("streamer"),
-            "zeit": nowstr(),
-            "kommentar": "",
-        }
-        if typ == "custom":
-            request.update({
-                "preis": fields.get("preis"),
-                "bezahlt": fields.get("bezahlt"),
-                "anfrage": fields.get("anfrage"),
-                "zeitgrenze": fields.get("zeitgrenze"),
-            })
-        else:
-            request.update({
-                "audiowunsch": fields.get("audiowunsch"),
-                "zeitgrenze": fields.get("zeitgrenze"),
-            })
-        # Embed/Post
-        embed = make_embed(request, status="active")
-        view = CloseRequestView(self, req_id)
-        msg = await aktiv_channel.send(embed=embed, view=view)
-        request["message_id"] = msg.id
-        data[req_id] = request
-        await save_data(data)
-        # Loggen
-        log = await get_log()
-        log.setdefault("requests", []).append({**request, "created_at": nowstr()})
-        await save_log(log)
-        # DM an Lead
-        await self.notify_leads(interaction.guild, request)
-        await interaction.response.send_message("Anfrage erstellt!", ephemeral=True)
+            return await utils.send_error(interaction, "Setze zuerst den Aktiv-Kanal mit /requestsetaktiv!")
+        channel = interaction.guild.get_channel(aktiv_id)
+        view = RequestTypeView(self)
+        embed = discord.Embed(
+            title="📬 Neue Anfrage",
+            description="Wähle unten den Typ deiner Anfrage aus:",
+            color=COLOR_NEW
+        )
+        await channel.send(embed=embed, view=view)
+        await utils.send_success(interaction, "Menü für Anfragen gepostet.")
 
-    async def notify_leads(self, guild, request):
-        cfg = await get_config()
-        leads = []
-        typ = request["typ"]
-        if typ == "custom":
-            leads = cfg.get("custom_leads", [])
-        else:
-            leads = cfg.get("ai_leads", [])
-        if not leads:
-            return
-        for lead_id in leads:
-            member = guild.get_member(lead_id)
-            if member:
-                try:
-                    embed = make_embed(request, status="active")
-                    await member.send(
-                        content="**Neue Anfrage erhalten!**\nBitte entscheide:",
-                        embed=embed,
-                        view=LeadDecisionView(self, request["id"])
-                    )
-                except Exception:
-                    pass
+# ========== Dynamische Views & Popups ==========
 
-    async def update_request_status(self, interaction, req_id, status, kommentar=None):
-        data = await get_data()
+class RequestTypeView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=300)
+        self.cog = cog
+
+    @discord.ui.button(label="🎨 Custom", style=discord.ButtonStyle.primary)
+    async def custom_btn(self, interaction: Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(CustomRequestModal(self.cog))
+
+    @discord.ui.button(label="🤖 AI-Voice", style=discord.ButtonStyle.secondary)
+    async def ai_btn(self, interaction: Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(AiRequestModal(self.cog))
+
+class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(label="Streamer", max_length=50, required=True)
+        self.preis = discord.ui.TextInput(label="Preis ($)", max_length=10, required=True)
+        self.bezahlt = discord.ui.TextInput(label="Bezahlt? (ja/nein)", max_length=10, required=True)
+        self.anfrage = discord.ui.TextInput(label="Anfrage", style=discord.TextStyle.paragraph, max_length=500, required=True)
+        self.zeit = discord.ui.TextInput(label="Zeitgrenze", max_length=50, required=True)
+        self.add_item(self.streamer)
+        self.add_item(self.preis)
+        self.add_item(self.bezahlt)
+        self.add_item(self.anfrage)
+        self.add_item(self.zeit)
+
+    async def on_submit(self, interaction: Interaction):
         cfg = await get_config()
-        req = data.get(req_id)
-        if not req:
-            return await utils.send_error(interaction, "Anfrage existiert nicht mehr.")
-        req["status"] = status
-        if kommentar is not None:
-            req["kommentar"] = kommentar
-        await save_data(data)
-        # Update im Aktiv/Done Channel
-        aktiv_channel = interaction.guild.get_channel(cfg.get("aktiv_channel_id"))
-        done_channel = interaction.guild.get_channel(cfg.get("done_channel_id"))
-        # Embed+Status+Color updaten
-        embed = make_embed(req, status=status)
+        forum = interaction.guild.get_channel(cfg["aktiv_id"])
+        embed = discord.Embed(
+            title=self.streamer.value,
+            color=COLOR_NEW,
+            description=f"**Preis:** {self.preis.value}\n**Bezahlt:** {self.bezahlt.value}\n**Zeit:** {self.zeit.value}\n**Anfrage:**\n{self.anfrage.value}"
+        )
+        embed.set_footer(text=f"Erstellt von {interaction.user.display_name} | {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        # Thread/Post anlegen (Forum-Post)
+        post = await forum.create_thread(
+            name=self.streamer.value,
+            content=None,
+            embed=embed
+        )
+        # Leads pingen
+        cfg = await get_config()
+        mentions = " ".join(f"<@{uid}>" for uid in cfg["custom_leads"])
+        if mentions:
+            try:
+                await post.send(f"{mentions} – Neue Custom-Anfrage! Bitte entscheide.", view=DecisionView(post.id, decision_callback_factory(post, interaction.user, "custom")))
+            except Exception as e:
+                print(e)
+        await utils.send_success(interaction, "Custom-Anfrage wurde erstellt!")
+
+class AiRequestModal(discord.ui.Modal, title="AI-Voice Anfrage"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(label="Streamer", max_length=50, required=True)
+        self.audio = discord.ui.TextInput(label="Audio-Wunsch", style=discord.TextStyle.paragraph, max_length=300, required=True)
+        self.zeit = discord.ui.TextInput(label="Bis wann gebraucht?", max_length=50, required=True)
+        self.add_item(self.streamer)
+        self.add_item(self.audio)
+        self.add_item(self.zeit)
+
+    async def on_submit(self, interaction: Interaction):
+        cfg = await get_config()
+        forum = interaction.guild.get_channel(cfg["aktiv_id"])
+        embed = discord.Embed(
+            title=self.streamer.value,
+            color=COLOR_NEW,
+            description=f"**AI Voice Anfrage für:** {self.streamer.value}\n**Audio-Wunsch:**\n{self.audio.value}\n**Bis wann:** {self.zeit.value}"
+        )
+        embed.set_footer(text=f"Erstellt von {interaction.user.display_name} | {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        post = await forum.create_thread(
+            name=self.streamer.value,
+            content=None,
+            embed=embed
+        )
+        # Leads pingen
+        cfg = await get_config()
+        mentions = " ".join(f"<@{uid}>" for uid in cfg["ai_leads"])
+        if mentions:
+            try:
+                await post.send(f"{mentions} – Neue AI-Voice-Anfrage! Bitte entscheide.", view=DecisionView(post.id, decision_callback_factory(post, interaction.user, "ai")))
+            except Exception as e:
+                print(e)
+        await utils.send_success(interaction, "AI-Voice-Anfrage wurde erstellt!")
+
+# ========== Entscheidungscallback ==========
+
+def decision_callback_factory(post, requester, typ):
+    async def callback(interaction, post_id, decision, info=None):
+        # Hole Konfigurationen
+        cfg = await get_config()
+        done_forum = interaction.guild.get_channel(cfg["done_id"])
+        # Thread holen
+        thread = post
+        # Status, Farbe, Kommentar bauen
+        if decision == "accepted":
+            color = COLOR_ACCEPTED
+            status = "✅ Genehmigt"
+            info_text = ""
+        elif decision == "declined":
+            color = COLOR_DECLINED
+            status = "❌ Abgelehnt"
+            info_text = f"**Begründung:** {info}"
+        else:
+            color = COLOR_WORKING
+            status = "🟡 In Bearbeitung"
+            info_text = f"**Info:** {info}"
+
+        # Ursprungs-Embed übernehmen, modifizieren
+        orig = None
+        async for msg in thread.history(limit=10):
+            if msg.embeds:
+                orig = msg.embeds[0]
+                break
+
+        embed = discord.Embed(
+            title=orig.title if orig else "Anfrage",
+            color=color,
+            description=f"{orig.description if orig else ''}\n\n**Status:** {status}\n{info_text}"
+        )
+        embed.set_footer(text=f"Bearbeitet von {interaction.user.display_name} am {datetime.now().strftime('%d.%m.%Y %H:%M')}")
+        await thread.send(embed=embed)
+        # Ersteller benachrichtigen
         try:
-            if "message_id" in req and aktiv_channel:
-                msg = await aktiv_channel.fetch_message(req["message_id"])
-                await msg.edit(embed=embed, view=CloseRequestView(self, req_id) if status != "done" else None)
+            await requester.send(
+                f"Deine Anfrage **{orig.title if orig else 'Anfrage'}** wurde **{status}**.\n{info_text}"
+            )
         except Exception:
             pass
-        # Notification an Ersteller
-        user = interaction.guild.get_member(req["user_id"])
-        if user:
-            try:
-                txt = {
-                    "done": "✅ Deine Anfrage wurde **angenommen**!",
-                    "bearbeitet": "⚠️ Deine Anfrage ist **in Bearbeitung**.",
-                    "abgelehnt": "❌ Deine Anfrage wurde **abgelehnt**.",
-                }.get(status, "Anfrage-Status geändert.")
-                await user.send(
-                    f"{txt}\nStreamer: **{req['streamer']}**\nKommentar: {kommentar or '-'}"
-                )
-            except Exception:
-                pass
-        # Kommentar posten (optional als Kommentar, wenn du willst)
-        # Bei „done“ → In Done-Channel verschieben
-        if status == "done" and done_channel:
-            embed = make_embed(req, status="done")
-            await done_channel.send(embed=embed)
-            try:
-                # Lösche aus aktiv-channel
-                if "message_id" in req:
-                    msg = await aktiv_channel.fetch_message(req["message_id"])
-                    await msg.delete()
-            except Exception:
-                pass
-        await utils.send_success(interaction, f"Status geändert auf {status.capitalize()}.")
+        # In Done moven: neuen Post, alten schließen/löschen
+        if decision in ["accepted", "declined"]:
+            post_done = await done_forum.create_thread(
+                name=orig.title if orig else "Anfrage",
+                content=None,
+                embed=embed
+            )
+            await thread.edit(locked=True, archived=True, reason="Erledigt")
+        await interaction.response.send_message(f"Entscheidung: {status} gespeichert!", ephemeral=True)
+    return callback
 
-    async def close_request(self, interaction, req_id):
-        data = await get_data()
-        cfg = await get_config()
-        req = data.pop(req_id, None)
-        await save_data(data)
-        done_channel = interaction.guild.get_channel(cfg.get("done_channel_id"))
-        if req and done_channel:
-            embed = make_embed(req, status=req["status"])
-            await done_channel.send(embed=embed)
-        # Lösche aus aktiv-channel
-        aktiv_channel = interaction.guild.get_channel(cfg.get("aktiv_channel_id"))
-        try:
-            if req and "message_id" in req and aktiv_channel:
-                msg = await aktiv_channel.fetch_message(req["message_id"])
-                await msg.delete()
-        except Exception:
-            pass
-        await utils.send_success(interaction, "Anfrage geschlossen und archiviert.")
+# ========== Setup ==========
 
-# ============= Setup =============
 async def setup(bot):
     await bot.add_cog(RequestCog(bot))
+
