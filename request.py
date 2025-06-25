@@ -164,12 +164,11 @@ class RequestCog(commands.Cog):
             return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
         forum = interaction.guild.get_channel(forum_id)
 
-        # Nummer für Post berechnen
-        all_threads = [t async for t in forum.threads()]
+        # FIX: forum.threads ist bereits eine Liste, KEIN Callable!
+        all_threads = forum.threads
         nr = len(all_threads) + 1
         data["nr"] = nr
 
-        # Titel-Formatierung: [Status] - [Streamername] - [Ersteller] - [Typ] - #Nr
         thread_title = build_thread_title("offen", data['streamer'], str(interaction.user), reqtype, nr)
         thread_with_message = await forum.create_thread(
             name=thread_title,
@@ -184,9 +183,7 @@ class RequestCog(commands.Cog):
         embed = build_embed(data, status="offen")
         view = RequestThreadView(self, data, channel)
         await channel.send(embed=embed, view=view)
-        # Starte Chatbackup Tracking
         self.chat_backups[channel.id] = []
-        # Starte Lead-DM
         await self.send_lead_dm(interaction, data, channel, reqtype)
         await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
 
@@ -221,10 +218,8 @@ class RequestCog(commands.Cog):
                 except Exception:
                     pass
 
-    # -- Chatbackup Handling für Backups --
     async def on_thread_message(self, message):
         if message.channel.id in self.chat_backups:
-            # keine Systemnachrichten oder Bot-eigene Nachrichten
             if not message.author.bot:
                 self.chat_backups[message.channel.id].append(
                     (message.author.display_name, message.content)
@@ -252,8 +247,6 @@ class RequestTypeDropdown(discord.ui.Select):
         elif self.values[0] == "ai":
             await interaction.response.send_modal(AIRequestModal(self.cog, self))
 
-# ========== Modals ==========
-
 class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
     def __init__(self, cog, dropdown):
         super().__init__()
@@ -279,7 +272,6 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
             "zeitgrenze": self.zeitgrenze.value,
         }
         await self.cog.post_request(interaction, data, "custom")
-        # Reset Dropdown (Workaround: remove + add again = "unselect" auf Discord Seite)
         self.dropdown.values = []
         await interaction.message.edit(view=self.dropdown.view)
 
@@ -302,11 +294,9 @@ class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage"):
             "zeitgrenze": self.zeitgrenze.value,
         }
         await self.cog.post_request(interaction, data, "ai")
-        # Reset Dropdown
         self.dropdown.values = []
         await interaction.message.edit(view=self.dropdown.view)
 
-# -- Thread-View mit Statusbearbeitung & Schließbutton --
 class RequestThreadView(discord.ui.View):
     def __init__(self, cog, data, thread_channel):
         super().__init__(timeout=None)
@@ -324,13 +314,11 @@ class StatusEditButton(discord.ui.Button):
         self.thread_channel = thread_channel
 
     async def callback(self, interaction: Interaction):
-        # Nur Lead kann Status ändern!
         leads = await get_leads()
         reqtype = self.data['type']
         allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"]
         if interaction.user.id not in allowed_leads:
             return await utils.send_error(interaction, "Nur der zuständige Lead kann den Status ändern!")
-        # Dropdown als ephemeral
         await interaction.response.send_message(
             "Wähle den neuen Status:",
             view=StatusDropdownView(self.cog, self.data, self.thread_channel),
@@ -363,7 +351,6 @@ class StatusDropdown(discord.ui.Select):
         new_status = self.values[0]
         nr = self.data.get('nr', 0)
         self.data['status'] = new_status
-        # Titel ändern
         new_title = build_thread_title(new_status, self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
         await self.thread_channel.edit(name=new_title)
         embed = build_embed(self.data, status=new_status)
@@ -371,7 +358,6 @@ class StatusDropdown(discord.ui.Select):
             content=f"Status geändert von {interaction.user.mention}:",
             embed=embed
         )
-        # DM an Ersteller
         guild = self.thread_channel.guild
         ersteller = guild.get_member(self.data['erstellerid'])
         if ersteller:
@@ -397,13 +383,13 @@ class CloseRequestButton(discord.ui.Button):
             return await utils.send_error(interaction, "Kein Done-Forum konfiguriert.")
         done_forum = interaction.guild.get_channel(done_forum_id)
         nr = self.data.get('nr', 0)
-        # Backup: Chatverlauf
         messages = []
         async for msg in self.thread_channel.history(limit=100, oldest_first=True):
             if not msg.author.bot or "Status geändert" in msg.content:
                 name = msg.author.display_name
                 content = msg.content
-                if content.strip() == "": continue
+                if content.strip() == "":
+                    continue
                 messages.append(f"**{name}:** {content}")
         last_status = STATUS_DISPLAY.get(self.data.get('status', 'offen'), "Unbekannt")
         backup_body = f"**Finaler Status:** {last_status}\n\n" + "\n".join(messages)
@@ -417,7 +403,6 @@ class CloseRequestButton(discord.ui.Button):
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
         await closed_channel.send(embed=embed)
         await closed_channel.send(backup_body)
-        # Sperren, nicht löschen!
         await self.thread_channel.edit(archived=True, locked=True)
         await interaction.response.send_message("Anfrage als erledigt verschoben und gesperrt!", ephemeral=True)
 
@@ -459,7 +444,6 @@ class LeadActionsDropdown(discord.ui.Select):
             content=f"Status geändert von {interaction.user.mention}:",
             embed=embed
         )
-        # DM an Ersteller
         guild = self.thread_channel.guild
         ersteller = guild.get_member(self.data['erstellerid'])
         if ersteller:
