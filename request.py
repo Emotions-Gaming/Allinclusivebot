@@ -239,7 +239,6 @@ class RequestCog(commands.Cog):
 # ========== UI-Klassen etc. wie gehabt ==========
 # HIER GEHT ES WEITER, die nächsten Blöcke (RequestMenuView, CustomRequestModal usw.)
 # ... Fortsetzung folgt im nächsten Post, Zeichenlimit!
-        )
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: Interaction):
