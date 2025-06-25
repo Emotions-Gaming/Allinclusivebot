@@ -11,9 +11,15 @@ GUILD_ID = int(os.environ.get("GUILD_ID", "0"))
 MY_GUILD = discord.Object(id=GUILD_ID)
 REQUEST_CONFIG_PATH = os.path.join("persistent_data", "request_config.json")
 REQUEST_LEADS_PATH = os.path.join("persistent_data", "request_leads.json")
+REQUEST_COUNT_PATH = os.path.join("persistent_data", "request_counter.json")
 MAX_TITLE_LEN = 80
 MAX_BODY_LEN = 500
 MAX_COMMENT_LEN = 200
+
+AI_VOICE_INFO = (
+    "‼️ **Hinweis:** Aktuell sind nur **Mila** und **Xenia** für AI Voice verfügbar!\n"
+    "Die gewünschten Texte dürfen maximal **10 Sekunden** lang sein."
+)
 
 STATUS_COLORS = {
     "offen": discord.Color.blurple(),
@@ -22,6 +28,42 @@ STATUS_COLORS = {
     "abgelehnt": discord.Color.red(),
     "geschlossen": discord.Color.dark_grey()
 }
+STATUS_DISPLAY = {
+    "offen": "🟦 Offen",
+    "angenommen": "🟩 Angenommen",
+    "bearbeitung": "🟨 In Bearbeitung",
+    "abgelehnt": "🟥 Abgelehnt",
+    "geschlossen": "🛑 Geschlossen"
+}
+
+def build_thread_title(status, streamer, username, typ, nr):
+    return f"[{STATUS_DISPLAY[status]}] - {streamer} - {username} - {typ.capitalize()} - #{nr}"
+
+def build_embed(data, status="offen"):
+    color = STATUS_COLORS.get(status, discord.Color.blurple())
+    title = build_thread_title(status, data['streamer'], data['erstellername'], data['type'], data['nr'])
+    if data["type"] == "custom":
+        desc = (
+            f"**Preis:** {data['preis']}\n"
+            f"**Bezahlt?** {data['bezahlt']}\n"
+            f"**Anfrage:** {data['anfrage']}\n"
+            f"**Zeitgrenze:** {data['zeitgrenze']}"
+        )
+    elif data["type"] == "ai":
+        desc = (
+            f"{AI_VOICE_INFO}\n\n"
+            f"**Audio Wunsch:** {data['audiowunsch']}\n"
+            f"**Zeitgrenze:** {data['zeitgrenze']}"
+        )
+    else:
+        desc = ""
+    embed = discord.Embed(
+        title=title,
+        description=f"{desc}\n\n**Status:** {STATUS_DISPLAY[status]}",
+        color=color
+    )
+    embed.set_footer(text=f"Anfrage-Typ: {data['type'].capitalize()} • Erstellt von: {data['erstellername']}")
+    return embed
 
 async def get_request_config():
     return await utils.load_json(REQUEST_CONFIG_PATH, {})
@@ -35,40 +77,21 @@ async def get_leads():
 async def save_leads(data):
     await utils.save_json(REQUEST_LEADS_PATH, data)
 
-def build_embed(data, status="offen"):
-    color = STATUS_COLORS.get(status, discord.Color.blurple())
-    title = f"📩 {data['streamer']}" if data.get("streamer") else "Anfrage"
-    desc = data.get("desc", "")
-    if data["type"] == "custom":
-        desc = (
-            f"**Preis:** {data['preis']}\n"
-            f"**Bezahlt?** {data['bezahlt']}\n"
-            f"**Anfrage:** {data['anfrage']}\n"
-            f"**Zeitgrenze:** {data['zeitgrenze']}"
-        )
-    elif data["type"] == "ai":
-        desc = (
-            f"**Audio Wunsch:** {data['audiowunsch']}\n"
-            f"**Zeitgrenze:** {data['zeitgrenze']}"
-        )
-    status_str = {
-        "offen": "🟦 Offen",
-        "angenommen": "🟩 Angenommen",
-        "bearbeitung": "🟨 In Bearbeitung",
-        "abgelehnt": "🟥 Abgelehnt",
-        "geschlossen": "🛑 Geschlossen"
-    }[status]
-    embed = discord.Embed(
-        title=title,
-        description=f"{desc}\n\n**Status:** {status_str}",
-        color=color
-    )
-    embed.set_footer(text=f"Anfrage-Typ: {data['type'].capitalize()} • Erstellt von: {data['erstellername']}")
-    return embed
+async def get_request_counter():
+    d = await utils.load_json(REQUEST_COUNT_PATH, {"count": 1})
+    return d.get("count", 1)
+
+async def increment_request_counter():
+    d = await utils.load_json(REQUEST_COUNT_PATH, {"count": 1})
+    d["count"] = d.get("count", 1) + 1
+    await utils.save_json(REQUEST_COUNT_PATH, d)
+    return d["count"] - 1
 
 class RequestCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.active_threads = {} # thread_id: data
+        self.chat_backups = {}   # thread_id: list of (author, content)
 
     # ========== Channel Setups ==========
     @app_commands.command(name="requestsetactive", description="Setzt das Forum für aktive Anfragen.")
@@ -157,39 +180,35 @@ class RequestCog(commands.Cog):
         if not forum_id:
             return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
         forum = interaction.guild.get_channel(forum_id)
-        title = f"{data['streamer'][:MAX_TITLE_LEN]}"
-        # Muss echten Text enthalten
-        first_msg = "Neue Anfrage erstellt."
-        thread = await forum.create_thread(
-            name=title,
-            content=first_msg,
-            applied_tags=[],
-        )
+        nr = await increment_request_counter()
         data["type"] = reqtype
         data["status"] = "offen"
         data["erstellerid"] = interaction.user.id
         data["erstellername"] = str(interaction.user)
-        # Ersten Embed-Post
+        data["nr"] = nr
+        thread_title = build_thread_title("offen", data['streamer'], data['erstellername'], data['type'], data['nr'])
+        thread_with_message = await forum.create_thread(
+            name=thread_title,
+            content="Neue Anfrage erstellt.",
+            applied_tags=[],
+        )
+        channel = thread_with_message.thread
         embed = build_embed(data, status="offen")
-        view = CloseRequestView(self, data, thread)
-        # Hinweis: Wir holen das erste Message-Objekt im Thread, damit alles sauber bleibt:
-        thread_msg = await thread.fetch_message(thread.id)
-        await thread_msg.edit(embed=embed, view=view)
-        # DM an Leads
-        await self.send_lead_dm(interaction, data, thread, reqtype)
+        view = PostActionsView(self, data, channel)
+        await channel.send(embed=embed, view=view)
+        self.active_threads[channel.id] = data.copy()
+        self.chat_backups[channel.id] = []
+        await self.send_lead_dm(interaction, data, channel, reqtype)
         await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
-        # Log Nachrichten im Thread (für späteres Backup)
-        data["thread_id"] = thread.id
 
-    async def send_lead_dm(self, interaction, data, thread, reqtype):
+    async def send_lead_dm(self, interaction, data, thread_channel, reqtype):
         leads = await get_leads()
         ids = leads["custom"] if reqtype == "custom" else leads["ai"]
         for uid in ids:
             lead = interaction.guild.get_member(uid)
             if lead:
                 try:
-                    # Buttons in DM:
-                    view = RequestActionView(self, data, thread)
+                    view = RequestActionView(self, data, thread_channel, lead)
                     msg = (
                         f"Neue **{'Custom' if reqtype == 'custom' else 'AI Voice'} Anfrage** von {interaction.user.mention}:\n"
                         f"**Streamer:** {data['streamer']}\n"
@@ -203,37 +222,24 @@ class RequestCog(commands.Cog):
                         )
                     else:
                         msg += (
+                            f"{AI_VOICE_INFO}\n"
                             f"**Audio Wunsch:** {data['audiowunsch']}\n"
                             f"**Zeitgrenze:** {data['zeitgrenze']}\n"
                         )
-                    msg += f"[Zum Thread]({thread.jump_url})"
+                    msg += f"[Zum Thread]({thread_channel.jump_url})"
                     await lead.send(msg, view=view)
                 except Exception:
                     pass
 
-    # ========== Backup nach Done ==========
-    async def move_to_done(self, guild, thread, data):
-        config = await get_request_config()
-        done_forum_id = config.get("done_forum")
-        if not done_forum_id:
-            return False
-        done_forum = guild.get_channel(done_forum_id)
-        # Backup: Nachrichten holen
-        messages = []
-        async for msg in thread.history(limit=100, oldest_first=True):
-            if msg.content or msg.embeds:
-                content = msg.content or ""
-                for embed in msg.embeds:
-                    content += "\n[EMBED]: " + (embed.description or "")
-                messages.append(f"{msg.author.display_name}: {content}")
-        log_text = "\n".join(messages) or "Keine Nachrichten"
-        closed_thread = await done_forum.create_thread(
-            name=thread.name,
-            content=f"Backup der Anfrage:\n{log_text}",
-            applied_tags=[],
-        )
-        # Fertig: Return
-        return closed_thread
+    # ========== Chat-Backup ==========
+    @commands.Cog.listener()
+    async def on_message(self, message):
+        if not message.guild or message.author.bot:
+            return
+        if message.channel.id in self.active_threads:
+            backup = self.chat_backups.get(message.channel.id, [])
+            backup.append((str(message.author), message.content))
+            self.chat_backups[message.channel.id] = backup
 
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
@@ -251,18 +257,16 @@ class RequestTypeDropdown(discord.ui.Select):
         super().__init__(placeholder="Wähle eine Anfrage-Art…", min_values=1, max_values=1, options=options)
 
     async def callback(self, interaction: Interaction):
-        # Show Modal je nach Anfrage-Typ
         if self.values[0] == "custom":
-            await interaction.response.send_modal(CustomRequestModal(self.cog))
+            await interaction.response.send_modal(CustomRequestModal(self.cog, self))
         elif self.values[0] == "ai":
-            await interaction.response.send_modal(AIRequestModal(self.cog))
-
-# ========== Modals ==========
+            await interaction.response.send_modal(AIRequestModal(self.cog, self))
 
 class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
-    def __init__(self, cog):
+    def __init__(self, cog, dropdown):
         super().__init__()
         self.cog = cog
+        self.dropdown = dropdown
         self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
         self.preis = discord.ui.TextInput(label="Preis (z. B. 400€)", max_length=20, required=True)
         self.bezahlt = discord.ui.TextInput(label="Bezahlt?", placeholder="Ja/Nein", max_length=10, required=True)
@@ -283,11 +287,14 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
             "zeitgrenze": self.zeitgrenze.value,
         }
         await self.cog.post_request(interaction, data, "custom")
+        # Set dropdown back to default so Menü kann wieder genutzt werden
+        self.dropdown.values = []
 
 class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage"):
-    def __init__(self, cog):
+    def __init__(self, cog, dropdown):
         super().__init__()
         self.cog = cog
+        self.dropdown = dropdown
         self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
         self.audiowunsch = discord.ui.TextInput(label="Audio Wunsch", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN, required=True)
         self.zeitgrenze = discord.ui.TextInput(label="Zeitgrenze", max_length=40, required=True)
@@ -302,15 +309,127 @@ class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage"):
             "zeitgrenze": self.zeitgrenze.value,
         }
         await self.cog.post_request(interaction, data, "ai")
+        self.dropdown.values = []
 
-# ========== Action Buttons ==========
-
-class RequestActionView(discord.ui.View):
-    def __init__(self, cog, data, thread):
+# ========== Actions im Post ==========
+class PostActionsView(discord.ui.View):
+    def __init__(self, cog, data, thread_channel):
         super().__init__(timeout=None)
         self.cog = cog
         self.data = data
-        self.thread = thread
+        self.thread_channel = thread_channel
+        self.add_item(StatusEditButton(cog, data, thread_channel))
+        self.add_item(CloseRequestButton(cog, data, thread_channel))
+
+# Status bearbeiten Button für Leads
+class StatusEditButton(discord.ui.Button):
+    def __init__(self, cog, data, thread_channel):
+        super().__init__(label="Status bearbeiten", style=discord.ButtonStyle.primary, emoji="🛠")
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+
+    async def callback(self, interaction: Interaction):
+        leads = await get_leads()
+        reqtype = self.data['type']
+        allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"]
+        if interaction.user.id not in allowed_leads:
+            return await utils.send_error(interaction, "Nur der zuständige Lead kann den Status ändern!")
+        await interaction.response.send_modal(StatusEditModal(self.cog, self.data, self.thread_channel))
+
+# Modal für Statusauswahl
+class StatusEditModal(discord.ui.Modal, title="Status ändern"):
+    status_options = [
+        ("offen", "🟦 Offen"),
+        ("angenommen", "🟩 Angenommen"),
+        ("bearbeitung", "🟨 In Bearbeitung"),
+        ("abgelehnt", "🟥 Abgelehnt"),
+        ("geschlossen", "🛑 Geschlossen"),
+    ]
+
+    def __init__(self, cog, data, thread_channel):
+        super().__init__()
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+        self.status = discord.ui.TextInput(
+            label="Neuer Status",
+            placeholder="offen / angenommen / bearbeitung / abgelehnt / geschlossen",
+            max_length=20,
+            required=True
+        )
+        self.add_item(self.status)
+
+    async def on_submit(self, interaction: Interaction):
+        new_status = self.status.value.lower()
+        if new_status not in STATUS_COLORS:
+            return await utils.send_error(interaction, "Ungültiger Status!")
+        # Titel und Embed updaten
+        self.data['status'] = new_status
+        nr = self.data.get('nr', 0)
+        new_title = build_thread_title(new_status, self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
+        await self.thread_channel.edit(name=new_title)
+        embed = build_embed(self.data, status=new_status)
+        await self.thread_channel.send(content=f"Status von {interaction.user.mention} geändert:", embed=embed)
+        # DM an Ersteller bei Änderung
+        guild = self.thread_channel.guild
+        ersteller = guild.get_member(self.data['erstellerid'])
+        if ersteller:
+            try:
+                await ersteller.send(
+                    f"Deine Anfrage **{self.data['streamer']}** hat nun den Status: **{STATUS_DISPLAY[new_status]}**!"
+                )
+            except Exception:
+                pass
+        await utils.send_success(interaction, f"Status geändert zu {STATUS_DISPLAY[new_status]}.")
+
+# Anfrage schließen (nur Lead oder Ersteller)
+class CloseRequestButton(discord.ui.Button):
+    def __init__(self, cog, data, thread_channel):
+        super().__init__(label="Anfrage schließen", style=discord.ButtonStyle.danger, emoji="🔒")
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+
+    async def callback(self, interaction: Interaction):
+        # Nur Lead oder Ersteller darf schließen
+        leads = await get_leads()
+        reqtype = self.data['type']
+        allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"]
+        is_lead = interaction.user.id in allowed_leads
+        is_creator = interaction.user.id == self.data['erstellerid']
+        if not (is_lead or is_creator):
+            return await utils.send_error(interaction, "Nur der zuständige Lead oder der Ersteller kann schließen!")
+        config = await get_request_config()
+        done_forum_id = config.get("done_forum")
+        if not done_forum_id:
+            return await utils.send_error(interaction, "Kein Done-Forum konfiguriert.")
+        done_forum = interaction.guild.get_channel(done_forum_id)
+        nr = self.data.get('nr', 0)
+        closed_thread_with_msg = await done_forum.create_thread(
+            name=build_thread_title("geschlossen", self.data['streamer'], self.data['erstellername'], self.data['type'], nr),
+            content="Abgeschlossene Anfrage.",
+            applied_tags=[],
+        )
+        closed_channel = closed_thread_with_msg.thread
+        embed = build_embed(self.data, status="geschlossen")
+        # Chatverlauf sichern und posten
+        backup_msgs = self.cog.chat_backups.get(self.thread_channel.id, [])
+        backup_text = "\n".join([f"**{author}:** {content}" for author, content in backup_msgs])
+        if backup_text:
+            await closed_channel.send("**Chatverlauf:**\n" + backup_text)
+        await closed_channel.send(embed=embed)
+        await self.thread_channel.edit(archived=True, locked=True)
+        await utils.send_success(interaction, "Anfrage als erledigt verschoben.")
+
+# Lead-DM-Aktionen
+class RequestActionView(discord.ui.View):
+    def __init__(self, cog, data, thread_channel, lead_user):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+        self.lead_user = lead_user
 
     @discord.ui.button(label="Genehmigen", style=discord.ButtonStyle.success)
     async def approve(self, interaction: Interaction, button: discord.ui.Button):
@@ -322,32 +441,37 @@ class RequestActionView(discord.ui.View):
 
     @discord.ui.button(label="Ablehnen", style=discord.ButtonStyle.danger)
     async def decline(self, interaction: Interaction, button: discord.ui.Button):
-        modal = DeclineReasonModal(self.cog, self.data, self.thread)
+        modal = DeclineReasonModal(self.cog, self.data, self.thread_channel)
         await interaction.response.send_modal(modal)
 
     async def change_status(self, interaction, status):
+        self.data['status'] = status
+        nr = self.data.get('nr', 0)
+        new_title = build_thread_title(status, self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
+        await self.thread_channel.edit(name=new_title)
         embed = build_embed(self.data, status=status)
-        # Edit the first message in the thread (for maximum clarity)
-        try:
-            thread_msg = await self.thread.fetch_message(self.thread.id)
-            await thread_msg.edit(embed=embed)
-        except Exception:
-            await self.thread.send(embed=embed)
-        # Notify creator via DM
-        creator = self.thread.guild.get_member(self.data["erstellerid"])
-        if creator:
+        await self.thread_channel.send(
+            content=f"Status geändert von {interaction.user.mention}:",
+            embed=embed
+        )
+        # DM an Ersteller
+        guild = self.thread_channel.guild
+        ersteller = guild.get_member(self.data['erstellerid'])
+        if ersteller:
             try:
-                await creator.send(f"Deine Anfrage **{self.data['streamer']}** wurde auf Status **{status}** geändert.")
+                await ersteller.send(
+                    f"Deine Anfrage **{self.data['streamer']}** hat nun den Status: **{STATUS_DISPLAY[status]}**!"
+                )
             except Exception:
                 pass
-        await interaction.response.send_message(f"Status zu **{status}** geändert.", ephemeral=True)
+        await utils.send_success(interaction, f"Status zu **{STATUS_DISPLAY[status]}** geändert.")
 
 class DeclineReasonModal(discord.ui.Modal, title="Ablehnungsgrund angeben"):
-    def __init__(self, cog, data, thread):
+    def __init__(self, cog, data, thread_channel):
         super().__init__()
         self.cog = cog
         self.data = data
-        self.thread = thread
+        self.thread_channel = thread_channel
         self.reason = discord.ui.TextInput(
             label="Grund für Ablehnung",
             style=discord.TextStyle.paragraph,
@@ -357,51 +481,27 @@ class DeclineReasonModal(discord.ui.Modal, title="Ablehnungsgrund angeben"):
         self.add_item(self.reason)
 
     async def on_submit(self, interaction: Interaction):
+        self.data['status'] = "abgelehnt"
+        nr = self.data.get('nr', 0)
+        new_title = build_thread_title("abgelehnt", self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
+        await self.thread_channel.edit(name=new_title)
         embed = build_embed(self.data, status="abgelehnt")
         embed.add_field(name="Ablehnungsgrund", value=self.reason.value, inline=False)
-        try:
-            thread_msg = await self.thread.fetch_message(self.thread.id)
-            await thread_msg.edit(embed=embed)
-        except Exception:
-            await self.thread.send(embed=embed)
-        # Notify creator via DM and clean up DMs for leads
-        creator = self.thread.guild.get_member(self.data["erstellerid"])
-        if creator:
+        await self.thread_channel.send(
+            content=f"Status geändert von {interaction.user.mention}:",
+            embed=embed
+        )
+        # DM an Ersteller
+        guild = self.thread_channel.guild
+        ersteller = guild.get_member(self.data['erstellerid'])
+        if ersteller:
             try:
-                await creator.send(f"Deine Anfrage **{self.data['streamer']}** wurde **abgelehnt**.\nGrund: {self.reason.value}")
+                await ersteller.send(
+                    f"Deine Anfrage **{self.data['streamer']}** wurde abgelehnt!\n\n**Grund:** {self.reason.value}"
+                )
             except Exception:
                 pass
-        await interaction.response.send_message("Anfrage abgelehnt und Grund gepostet.", ephemeral=True)
-        # TODO: Delete DM for the lead if possible (Discord API currently doesn't allow bots to delete user DMs; would need to use MessageReference management)
-
-# ========== Schließ-Button im Thread ==========
-
-class CloseRequestView(discord.ui.View):
-    def __init__(self, cog, data, thread):
-        super().__init__(timeout=None)
-        self.cog = cog
-        self.data = data
-        self.thread = thread
-
-    @discord.ui.button(label="Anfrage schließen", style=discord.ButtonStyle.danger, emoji="🔒")
-    async def close(self, interaction: Interaction, button: discord.ui.Button):
-        # Nur Ersteller oder Leads dürfen schließen
-        user_id = interaction.user.id
-        is_creator = user_id == self.data["erstellerid"]
-        leads = await get_leads()
-        is_lead = user_id in leads["custom"] or user_id in leads["ai"]
-        if not (is_creator or is_lead):
-            return await interaction.response.send_message("Nur der Ersteller oder ein Lead darf schließen.", ephemeral=True)
-        # Move to Done, Log
-        done_thread = await self.cog.move_to_done(interaction.guild, self.thread, self.data)
-        # Vor dem Archivieren/Locken alle Messages holen!
-        await self.thread.edit(archived=True, locked=True)
-        try:
-            await interaction.response.send_message("Anfrage als erledigt verschoben.", ephemeral=True)
-        except Exception:
-            pass
-        # Optional: Thread löschen (statt locken/archivieren), wenn das gewünscht ist:
-        # await self.thread.delete()
+        await utils.send_success(interaction, "Anfrage abgelehnt und Grund gepostet.")
 
 # ========== Setup ==========
 async def setup(bot):
