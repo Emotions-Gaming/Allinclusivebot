@@ -1,4 +1,6 @@
-﻿import discord
+﻿# request.py
+
+import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -21,46 +23,49 @@ STATUS_COLORS = {
     "geschlossen": discord.Color.dark_grey()
 }
 STATUS_DISPLAY = {
-    "offen":      "🟦 Offen",
+    "offen": "🟦 Offen",
     "angenommen": "🟩 Angenommen",
-    "bearbeitung":"🟨 In Bearbeitung",
-    "abgelehnt":  "🟥 Abgelehnt",
-    "geschlossen":"🛑 Geschlossen"
-}
-STATUS_ICONS = {
-    "offen":      "🟦",
-    "angenommen": "🟩",
-    "bearbeitung":"🟨",
-    "abgelehnt":  "🟥",
-    "geschlossen":"🛑"
+    "bearbeitung": "🟨 In Bearbeitung",
+    "abgelehnt": "🟥 Abgelehnt",
+    "geschlossen": "🛑 Geschlossen"
 }
 
-def build_thread_title(status, streamer, username, typ, nr):
-    # [Status] - [Streamer] - [Username] - [Typ] - #Nr
-    st = STATUS_DISPLAY.get(status, "Offen")
-    return f"[{st.split()[1]}] - {streamer} - {username} - {typ.capitalize()} - #{nr}"
+def build_thread_title(status, streamer, ersteller, typ, nr):
+    return f"[{status.capitalize()}] - {streamer} - {ersteller} - {typ.capitalize()} - #{nr}"
+
+async def get_request_config():
+    return await utils.load_json(REQUEST_CONFIG_PATH, {})
+
+async def save_request_config(data):
+    await utils.save_json(REQUEST_CONFIG_PATH, data)
+
+async def get_leads():
+    return await utils.load_json(REQUEST_LEADS_PATH, {"custom": [], "ai": []})
+
+async def save_leads(data):
+    await utils.save_json(REQUEST_LEADS_PATH, data)
 
 def build_embed(data, status="offen"):
     color = STATUS_COLORS.get(status, discord.Color.blurple())
-    icon = STATUS_ICONS.get(status, "📩")
-    title = f"{icon} {data['streamer']}" if data.get("streamer") else "Anfrage"
-    desc = ""
+    title = f"📩 {data['streamer']}" if data.get("streamer") else "Anfrage"
+    desc = data.get("desc", "")
     if data["type"] == "custom":
         desc = (
-            f"💰 **Preis:** `{data['preis']}`\n"
-            f"💸 **Bezahlt?** `{data['bezahlt']}`\n"
-            f"📝 **Anfrage:**\n> {data['anfrage']}\n"
-            f"⏰ **Zeitgrenze:** `{data['zeitgrenze']}`"
+            f"**Preis:** {data['preis']}\n"
+            f"**Bezahlt?** {data['bezahlt']}\n"
+            f"**Anfrage:** {data['anfrage']}\n"
+            f"**Zeitgrenze:** {data['zeitgrenze']}"
         )
     elif data["type"] == "ai":
         desc = (
-            f"🎤 **Audio Wunsch:**\n> {data['audiowunsch']}\n"
-            f"⏰ **Zeitgrenze:** `{data['zeitgrenze']}`"
+            f":information_source: **Nur Mila und Xenia sind für AI Voice Over verfügbar!**\n"
+            f":alarm_clock: **Textlänge maximal 10 Sekunden!**\n\n"
+            f"**Audio Wunsch:** {data['audiowunsch']}\n"
+            f"**Zeitgrenze:** {data['zeitgrenze']}"
         )
-    status_str = STATUS_DISPLAY.get(status, "🟦 Offen")
     embed = discord.Embed(
         title=title,
-        description=f"{desc}\n\n**Status:** {status_str}",
+        description=f"{desc}\n\n**Status:** {STATUS_DISPLAY[status]}",
         color=color
     )
     embed.set_footer(text=f"Anfrage-Typ: {data['type'].capitalize()} • Erstellt von: {data['erstellername']}")
@@ -69,7 +74,9 @@ def build_embed(data, status="offen"):
 class RequestCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
+        self.chat_backups = {}  # thread_id: [(username, content), ...]
 
+    # ========== Channel Setups ==========
     @app_commands.command(name="requestsetactive", description="Setzt das Forum für aktive Anfragen.")
     @app_commands.guilds(MY_GUILD)
     async def requestsetactive(self, interaction: Interaction, channel: discord.ForumChannel):
@@ -97,17 +104,14 @@ class RequestCog(commands.Cog):
             return await utils.send_permission_denied(interaction)
         embed = discord.Embed(
             title="📩 Anfrage-System",
-            description=(
-                "**Wähle eine Option, um eine neue Anfrage zu stellen:**\n"
-                "• `Custom Anfrage`: Erstelle einen individuellen Wunsch (z.B. Video, Clip...)\n"
-                "• `AI Voice Anfrage`: KI-Stimmenanfrage (⚠️ Nur für Mila & Xenia, max. 10 Sek. Text!)"
-            ),
+            description="Wähle eine Option, um eine neue Anfrage zu stellen.",
             color=discord.Color.blurple()
         )
         view = RequestMenuView(self)
         await channel.send(embed=embed, view=view)
         await utils.send_success(interaction, f"Anfrage-Menü in {channel.mention} gepostet!")
 
+    # ========== LEAD Management ==========
     @app_commands.command(name="requestcustomlead", description="Fügt einen Custom-Lead hinzu.")
     @app_commands.guilds(MY_GUILD)
     async def requestcustomlead(self, interaction: Interaction, user: discord.User):
@@ -152,18 +156,22 @@ class RequestCog(commands.Cog):
             await save_leads(leads)
         await utils.send_success(interaction, f"{user.mention} wurde als AI-Lead entfernt.")
 
+    # ========== Haupt-Request-Posting ==========
     async def post_request(self, interaction, data, reqtype):
         config = await get_request_config()
         forum_id = config.get("active_forum")
         if not forum_id:
             return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
         forum = interaction.guild.get_channel(forum_id)
+
+        # FIX: forum.threads ist bereits eine Liste, KEIN Callable!
         all_threads = forum.threads
         nr = len(all_threads) + 1
-        data['nr'] = nr
-        title = build_thread_title("offen", data['streamer'], str(interaction.user), reqtype, nr)
+        data["nr"] = nr
+
+        thread_title = build_thread_title("offen", data['streamer'], str(interaction.user), reqtype, nr)
         thread_with_message = await forum.create_thread(
-            name=title,
+            name=thread_title,
             content="Neue Anfrage erstellt.",
             applied_tags=[],
         )
@@ -173,8 +181,9 @@ class RequestCog(commands.Cog):
         data["erstellerid"] = interaction.user.id
         data["erstellername"] = str(interaction.user)
         embed = build_embed(data, status="offen")
-        view = CloseRequestView(self, data, channel)
+        view = RequestThreadView(self, data, channel)
         await channel.send(embed=embed, view=view)
+        self.chat_backups[channel.id] = []
         await self.send_lead_dm(interaction, data, channel, reqtype)
         await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
 
@@ -187,31 +196,41 @@ class RequestCog(commands.Cog):
                 try:
                     view = LeadActionsDropdownView(self, data, thread_channel, lead)
                     msg = (
-                        f"**{'📝 Custom Anfrage' if reqtype == 'custom' else '🎤 AI Voice Anfrage'}** von {interaction.user.mention}\n"
-                        f"👤 **Streamer:** `{data['streamer']}`\n"
+                        f"Neue **{'Custom' if reqtype == 'custom' else 'AI Voice'} Anfrage** von {interaction.user.mention}:\n"
+                        f"**Streamer:** {data['streamer']}\n"
                     )
                     if reqtype == "custom":
                         msg += (
-                            f"💰 **Preis:** `{data['preis']}`\n"
-                            f"💸 **Bezahlt?** `{data['bezahlt']}`\n"
-                            f"📝 **Anfrage:** {data['anfrage']}\n"
-                            f"⏰ **Zeitgrenze:** `{data['zeitgrenze']}`\n"
+                            f"**Preis:** {data['preis']}\n"
+                            f"**Bezahlt?** {data['bezahlt']}\n"
+                            f"**Anfrage:** {data['anfrage']}\n"
+                            f"**Zeitgrenze:** {data['zeitgrenze']}\n"
                         )
                     else:
                         msg += (
-                            f"🎤 **Audio Wunsch:** {data['audiowunsch']}\n"
-                            f"⏰ **Zeitgrenze:** `{data['zeitgrenze']}`\n"
+                            ":information_source: Nur Mila und Xenia sind für AI Voice Over verfügbar!\n"
+                            ":alarm_clock: Textlänge maximal 10 Sekunden!\n"
+                            f"**Audio Wunsch:** {data['audiowunsch']}\n"
+                            f"**Zeitgrenze:** {data['zeitgrenze']}\n"
                         )
-                    msg += f"\n[➡️ Zum Thread]({thread_channel.jump_url})"
+                    msg += f"[Zum Thread]({thread_channel.jump_url})"
                     await lead.send(msg, view=view)
                 except Exception:
                     pass
+
+    async def on_thread_message(self, message):
+        if message.channel.id in self.chat_backups:
+            if not message.author.bot:
+                self.chat_backups[message.channel.id].append(
+                    (message.author.display_name, message.content)
+                )
 
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
         self.cog = cog
-        self.add_item(RequestTypeDropdown(cog))
+        self.dropdown = RequestTypeDropdown(cog)
+        self.add_item(self.dropdown)
 
 class RequestTypeDropdown(discord.ui.Select):
     def __init__(self, cog):
@@ -224,15 +243,15 @@ class RequestTypeDropdown(discord.ui.Select):
 
     async def callback(self, interaction: Interaction):
         if self.values[0] == "custom":
-            await interaction.response.send_modal(CustomRequestModal(self.cog))
+            await interaction.response.send_modal(CustomRequestModal(self.cog, self))
         elif self.values[0] == "ai":
-            await interaction.response.send_modal(AIRequestModal(self.cog))
-        self.values = []  # Reset selection, damit Dropdown nach Auswahl wieder frei ist
+            await interaction.response.send_modal(AIRequestModal(self.cog, self))
 
 class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
-    def __init__(self, cog):
+    def __init__(self, cog, dropdown):
         super().__init__()
         self.cog = cog
+        self.dropdown = dropdown
         self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
         self.preis = discord.ui.TextInput(label="Preis (z. B. 400€)", max_length=20, required=True)
         self.bezahlt = discord.ui.TextInput(label="Bezahlt?", placeholder="Ja/Nein", max_length=10, required=True)
@@ -253,11 +272,14 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage"):
             "zeitgrenze": self.zeitgrenze.value,
         }
         await self.cog.post_request(interaction, data, "custom")
+        self.dropdown.values = []
+        await interaction.message.edit(view=self.dropdown.view)
 
 class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage"):
-    def __init__(self, cog):
+    def __init__(self, cog, dropdown):
         super().__init__()
         self.cog = cog
+        self.dropdown = dropdown
         self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN, required=True)
         self.audiowunsch = discord.ui.TextInput(label="Audio Wunsch", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN, required=True)
         self.zeitgrenze = discord.ui.TextInput(label="Zeitgrenze", max_length=40, required=True)
@@ -272,44 +294,105 @@ class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage"):
             "zeitgrenze": self.zeitgrenze.value,
         }
         await self.cog.post_request(interaction, data, "ai")
+        self.dropdown.values = []
+        await interaction.message.edit(view=self.dropdown.view)
 
-# ========== Schließ-Button & Backup-Log ==========
-
-class CloseRequestView(discord.ui.View):
+class RequestThreadView(discord.ui.View):
     def __init__(self, cog, data, thread_channel):
         super().__init__(timeout=None)
         self.cog = cog
         self.data = data
         self.thread_channel = thread_channel
+        self.add_item(StatusEditButton(cog, data, thread_channel))
+        self.add_item(CloseRequestButton(cog, data, thread_channel))
 
-    @discord.ui.button(label="Anfrage schließen", style=discord.ButtonStyle.danger, emoji="🔒")
-    async def close(self, interaction: Interaction, button: discord.ui.Button):
+class StatusEditButton(discord.ui.Button):
+    def __init__(self, cog, data, thread_channel):
+        super().__init__(label="Status bearbeiten", style=discord.ButtonStyle.primary, emoji="✏️")
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+
+    async def callback(self, interaction: Interaction):
+        leads = await get_leads()
+        reqtype = self.data['type']
+        allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"]
+        if interaction.user.id not in allowed_leads:
+            return await utils.send_error(interaction, "Nur der zuständige Lead kann den Status ändern!")
+        await interaction.response.send_message(
+            "Wähle den neuen Status:",
+            view=StatusDropdownView(self.cog, self.data, self.thread_channel),
+            ephemeral=True
+        )
+
+class StatusDropdownView(discord.ui.View):
+    def __init__(self, cog, data, thread_channel):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+        self.add_item(StatusDropdown(cog, data, thread_channel))
+
+class StatusDropdown(discord.ui.Select):
+    def __init__(self, cog, data, thread_channel):
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+        options = [
+            discord.SelectOption(label="Offen", value="offen"),
+            discord.SelectOption(label="Angenommen", value="angenommen"),
+            discord.SelectOption(label="In Bearbeitung", value="bearbeitung"),
+            discord.SelectOption(label="Abgelehnt", value="abgelehnt"),
+            discord.SelectOption(label="Geschlossen", value="geschlossen")
+        ]
+        super().__init__(placeholder="Status wählen…", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: Interaction):
+        new_status = self.values[0]
+        nr = self.data.get('nr', 0)
+        self.data['status'] = new_status
+        new_title = build_thread_title(new_status, self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
+        await self.thread_channel.edit(name=new_title)
+        embed = build_embed(self.data, status=new_status)
+        await self.thread_channel.send(
+            content=f"Status geändert von {interaction.user.mention}:",
+            embed=embed
+        )
+        guild = self.thread_channel.guild
+        ersteller = guild.get_member(self.data['erstellerid'])
+        if ersteller:
+            try:
+                await ersteller.send(
+                    f"Deine Anfrage **{self.data['streamer']}** hat nun den Status: **{STATUS_DISPLAY[new_status]}**!"
+                )
+            except Exception:
+                pass
+        await interaction.response.send_message(f"Status wurde auf **{STATUS_DISPLAY[new_status]}** geändert!", ephemeral=True)
+
+class CloseRequestButton(discord.ui.Button):
+    def __init__(self, cog, data, thread_channel):
+        super().__init__(label="Anfrage schließen", style=discord.ButtonStyle.danger, emoji="🔒")
+        self.cog = cog
+        self.data = data
+        self.thread_channel = thread_channel
+
+    async def callback(self, interaction: Interaction):
         config = await get_request_config()
         done_forum_id = config.get("done_forum")
         if not done_forum_id:
             return await utils.send_error(interaction, "Kein Done-Forum konfiguriert.")
         done_forum = interaction.guild.get_channel(done_forum_id)
-        all_threads = done_forum.threads
-        nr = len(all_threads) + 1
-        self.data['nr'] = nr
-
-        # Chat-Backup bauen – schön formatiert:
+        nr = self.data.get('nr', 0)
         messages = []
         async for msg in self.thread_channel.history(limit=100, oldest_first=True):
-            # Nur Nutzernachrichten und nur mit Inhalt
-            if msg.content.strip():
-                display_name = msg.author.display_name
-                icon = ""
-                # Farbig & fett für abgelehnt, angenommen, usw.
-                if msg.author.bot:
-                    continue  # Bot-Einträge ausblenden, schöneres Log!
-                messages.append(f"> **{display_name}:** {msg.content}")
-
+            if not msg.author.bot or "Status geändert" in msg.content:
+                name = msg.author.display_name
+                content = msg.content
+                if content.strip() == "":
+                    continue
+                messages.append(f"**{name}:** {content}")
         last_status = STATUS_DISPLAY.get(self.data.get('status', 'offen'), "Unbekannt")
-        backup_body = (
-            f"**{last_status} Finaler Status**\n\n"
-            + "\n".join(messages) if messages else "*Kein Chatverlauf.*"
-        )
+        backup_body = f"**Finaler Status:** {last_status}\n\n" + "\n".join(messages)
         new_title = build_thread_title(self.data.get('status', 'geschlossen'), self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
@@ -340,11 +423,11 @@ class LeadActionsDropdown(discord.ui.Select):
         self.thread_channel = thread_channel
         self.lead = lead
         options = [
-            discord.SelectOption(label="Status: Offen", value="offen", emoji="🟦"),
-            discord.SelectOption(label="Status: Angenommen", value="angenommen", emoji="🟩"),
-            discord.SelectOption(label="Status: In Bearbeitung", value="bearbeitung", emoji="🟨"),
-            discord.SelectOption(label="Status: Abgelehnt", value="abgelehnt", emoji="🟥"),
-            discord.SelectOption(label="Status: Geschlossen", value="geschlossen", emoji="🛑"),
+            discord.SelectOption(label="Status: Offen", value="offen"),
+            discord.SelectOption(label="Status: Angenommen", value="angenommen"),
+            discord.SelectOption(label="Status: In Bearbeitung", value="bearbeitung"),
+            discord.SelectOption(label="Status: Abgelehnt", value="abgelehnt"),
+            discord.SelectOption(label="Status: Geschlossen", value="geschlossen")
         ]
         super().__init__(placeholder="Status direkt ändern…", min_values=1, max_values=1, options=options)
 
@@ -357,30 +440,21 @@ class LeadActionsDropdown(discord.ui.Select):
         new_title = build_thread_title(new_status, self.data['streamer'], self.data['erstellername'], self.data['type'], nr)
         await self.thread_channel.edit(name=new_title)
         embed = build_embed(self.data, status=new_status)
-        await self.thread_channel.send(embed=embed)
+        await self.thread_channel.send(
+            content=f"Status geändert von {interaction.user.mention}:",
+            embed=embed
+        )
         guild = self.thread_channel.guild
         ersteller = guild.get_member(self.data['erstellerid'])
         if ersteller:
             try:
                 await ersteller.send(
-                    f"**Update zu deiner Anfrage `{self.data['streamer']}`:**\nStatus geändert zu: **{STATUS_DISPLAY.get(new_status, new_status)}**"
+                    f"Deine Anfrage **{self.data['streamer']}** hat nun den Status: **{STATUS_DISPLAY[new_status]}**!"
                 )
             except Exception:
                 pass
-        await interaction.response.send_message("Status wurde geändert.", ephemeral=True)
+        await interaction.response.send_message(f"Status wurde auf **{STATUS_DISPLAY[new_status]}** geändert!", ephemeral=True)
 
 # ========== Setup ==========
-async def get_request_config():
-    return await utils.load_json(REQUEST_CONFIG_PATH, {})
-
-async def save_request_config(data):
-    await utils.save_json(REQUEST_CONFIG_PATH, data)
-
-async def get_leads():
-    return await utils.load_json(REQUEST_LEADS_PATH, {"custom": [], "ai": []})
-
-async def save_leads(data):
-    await utils.save_json(REQUEST_LEADS_PATH, data)
-
 async def setup(bot):
     await bot.add_cog(RequestCog(bot))
