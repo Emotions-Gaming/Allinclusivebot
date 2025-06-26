@@ -589,16 +589,20 @@ class CloseRequestButton(discord.ui.Button):
             self.data['type'],
             nr
         )
+        tag = (
+            TAG_CUSTOM["id"] if self.data['type'] == "custom"
+            else TAG_AI["id"] if self.data['type'] == "ai"
+            else TAG_WUNSCH["id"] if self.data['type'] == "wunsch"
+            else None
+        )
+        applied_tags = [tag] if tag is not None else []
+
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
             content="Backup der Anfrage.",
-            applied_tags=[
-                str(TAG_CUSTOM["id"]) if self.data['type'] == "custom"
-                else str(TAG_AI["id"]) if self.data['type'] == "ai"
-                else str(TAG_WUNSCH["id"]) if self.data['type'] == "wunsch"
-                else ""
-            ],
+            applied_tags=applied_tags,
         )
+
         closed_channel = closed_thread_with_msg.thread
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
         await closed_channel.send(embed=embed)
