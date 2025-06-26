@@ -10,13 +10,13 @@ REQUEST_CONFIG_PATH = os.path.join("persistent_data", "request_config.json")
 REQUEST_LEADS_PATH = os.path.join("persistent_data", "request_leads.json")
 MAX_TITLE_LEN = 80
 MAX_BODY_LEN = 500
-MAX_COMMENT_LEN = 200
 
-# ---- Tag-IDs wie von dir ----
+# ---- Tag-IDs (hier bitte ggf. deine echten Forum-Tag-IDs verwenden) ----
 TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": 1387599528831615087}
 TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": 1387599571441680505}
 TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": 1387599595667722330}
 
+# ---- Statusfarben & Anzeigenamen ----
 STATUS_COLORS = {
     "offen": discord.Color.blurple(),
     "angenommen": discord.Color.green(),
@@ -36,8 +36,13 @@ STATUS_DISPLAY = {
     "geschlossen": "🛑 Geschlossen"
 }
 
-def build_thread_title(status, streamer, ersteller, tag, typ, nr):
-    return f"[{status.capitalize()}] - {streamer} - {ersteller} - {tag} - {typ.capitalize()} - #{nr}"
+# ====== Hilfsfunktionen ======
+def build_thread_title(status, streamer, ersteller, customer_id, typ, nr):
+    # Für Custom immer Customer-ID, für AI/Wunsch ohne Customer-ID im Titel
+    if customer_id:
+        return f"[{status.capitalize()}] - {streamer} - {ersteller} - {customer_id} - {{{typ.capitalize()}}} - #{nr}"
+    else:
+        return f"[{status.capitalize()}] - {streamer} - {ersteller} - {{{typ.capitalize()}}} - #{nr}"
 
 async def get_request_config():
     return await utils.load_json(REQUEST_CONFIG_PATH, {})
@@ -54,17 +59,20 @@ async def save_leads(data):
 def build_embed(data, status="offen"):
     color = STATUS_COLORS.get(status, discord.Color.blurple())
     title = f"📩 {data['streamer']}" if data.get("streamer") else "Anfrage"
-    tagline = f"**Fan-Tag:** {data['fan_tag']}" if data.get("fan_tag") else ""
-    sprache = f"**Sprache:** {data['sprache']}" if data.get("sprache") else ""
+    tagline = f"**Fan-Tag:** {data.get('fan_tag', '')}" if data.get("fan_tag") else ""
+    customer_id = f"**CustomerID:** {data.get('customer_id', '')}" if data.get("customer_id") else ""
+    sprache = f"**Sprache:** {data.get('sprache', '')}" if data.get("sprache") else ""
     desc = data.get("desc", "")
-
+    # CUSTOM
     if data["type"] == "custom":
         desc = (
             f"{tagline}\n"
+            f"{customer_id}\n"
             f"**Preis und bezahlt?** {data['preis_bezahlt']}\n"
             f"{sprache}\n"
             f"**Anfrage + Bis Wann?** {data['anfrage_bis']}"
         )
+    # AI
     elif data["type"] == "ai":
         desc = (
             f":information_source: **Nur Mila und Xenia sind für AI Voice Over verfügbar!**\n"
@@ -73,6 +81,7 @@ def build_embed(data, status="offen"):
             f"**Audio Wunsch:** {data['audiowunsch']}\n"
             f"**Bis wann:** {data['zeitgrenze']}"
         )
+    # WUNSCH
     elif data["type"] == "wunsch":
         desc = (
             f"**Typ:** {data['media_typ']}\n"
@@ -80,6 +89,7 @@ def build_embed(data, status="offen"):
             f"**Anfrage:** {data['anfrage']}\n"
             f"**Bis wann:** {data['zeitgrenze']}"
         )
+
     embed = discord.Embed(
         title=title,
         description=f"{desc}\n\n**Status:** {STATUS_DISPLAY[status]}",
@@ -88,6 +98,7 @@ def build_embed(data, status="offen"):
     embed.set_footer(text=f"Typ: {data['type'].capitalize()} • Erstellt von: {data['erstellername']}")
     return embed
 
+# ========== Cog ==============
 class RequestCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -120,16 +131,19 @@ class RequestCog(commands.Cog):
     async def requestmain(self, interaction: Interaction, channel: discord.TextChannel):
         if not utils.is_admin(interaction.user):
             return await utils.send_permission_denied(interaction)
+        await self._post_menu(channel)
+        await utils.send_success(interaction, f"Anfrage-Menü in {channel.mention} gepostet!")
+
+    async def _post_menu(self, channel):
         embed = discord.Embed(
             title="📩 Anfrage-System",
             description="Wähle unten eine Kategorie aus, um eine Anfrage zu erstellen.",
             color=discord.Color.blurple()
         )
-        view = RequestMenuView(self)
+        view = RequestMenuView(self, channel)
         await channel.send(embed=embed, view=view)
-        await utils.send_success(interaction, f"Anfrage-Menü in {channel.mention} gepostet!")
 
-    # ==== Lead-Management ====
+    # ==== Lead-Management (wie gehabt, alle Typen) ====
     @app_commands.command(name="requestcustomlead", description="Fügt einen Custom-Lead hinzu.")
     @app_commands.guilds(MY_GUILD)
     async def requestcustomlead(self, interaction: Interaction, user: discord.User):
@@ -196,32 +210,40 @@ class RequestCog(commands.Cog):
             await save_leads(leads)
         await utils.send_success(interaction, f"{user.mention} wurde als Wunsch-Lead entfernt.")
 
-    # ======= Haupt-Request-Posting (jetzt MIT Tag-Objekten, kein Fehler mehr) =======
-    async def post_request(self, interaction, data, reqtype):
+    # ======= Haupt-Request-Posting (mit Tags) =======
+    async def post_request(self, interaction, data, reqtype, menu_channel=None):
         config = await get_request_config()
         forum_id = config.get("active_forum")
         if not forum_id:
             return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
+
         forum = interaction.guild.get_channel(forum_id)
         all_threads = forum.threads
         nr = len(all_threads) + 1
         data["nr"] = nr
 
-        # ---- Tag-Objekt holen ----
+        # Titelstruktur & Tags
         if reqtype == "custom":
-            tag_obj = discord.utils.get(forum.available_tags, id=int(TAG_CUSTOM["id"]))
-            applied_tags = [tag_obj] if tag_obj else []
+            applied_tags = [TAG_CUSTOM["id"]]
             tag_text = TAG_CUSTOM["name"]
+            customer_id = data.get("customer_id", "")
+            thread_title = build_thread_title(
+                "offen", data['streamer'], str(interaction.user), customer_id, tag_text, nr
+            )
         elif reqtype == "ai":
-            tag_obj = discord.utils.get(forum.available_tags, id=int(TAG_AI["id"]))
-            applied_tags = [tag_obj] if tag_obj else []
+            applied_tags = [TAG_AI["id"]]
             tag_text = TAG_AI["name"]
+            thread_title = build_thread_title(
+                "offen", data['streamer'], str(interaction.user), "", tag_text, nr
+            )
         else:
-            tag_obj = discord.utils.get(forum.available_tags, id=int(TAG_WUNSCH["id"]))
-            applied_tags = [tag_obj] if tag_obj else []
+            applied_tags = [TAG_WUNSCH["id"]]
             tag_text = TAG_WUNSCH["name"]
+            thread_title = build_thread_title(
+                "offen", data['streamer'], str(interaction.user), "", tag_text, nr
+            )
 
-        thread_title = build_thread_title("offen", data['streamer'], str(interaction.user), tag_text, reqtype, nr)
+        # NEU: applied_tags als Liste von IDs übergeben!
         thread_with_message = await forum.create_thread(
             name=thread_title,
             content="Neue Anfrage erstellt.",
@@ -240,6 +262,10 @@ class RequestCog(commands.Cog):
         self.chat_backups[channel.id] = []
         await self.send_lead_dm(interaction, data, channel, reqtype)
         await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
+
+        # Menü nach Modal-Ausfüllen automatisch neuposten
+        if menu_channel:
+            await self._post_menu(menu_channel)
 
     # ==== DM an Lead (wie gehabt) ====
     async def send_lead_dm(self, interaction, data, thread_channel, reqtype):
@@ -262,6 +288,7 @@ class RequestCog(commands.Cog):
                     if reqtype == "custom":
                         msg += (
                             f"**Fan-Tag:** {data['fan_tag']}\n"
+                            f"**CustomerID:** {data.get('customer_id','')}\n"
                             f"**Preis und bezahlt?** {data['preis_bezahlt']}\n"
                             f"**Sprache:** {data['sprache']}\n"
                             f"**Anfrage + Bis Wann?** {data['anfrage_bis']}\n"
@@ -286,7 +313,6 @@ class RequestCog(commands.Cog):
                 except Exception:
                     pass
 
-    # ====== Nachrichten Backup für später (done-thread) ======
     async def on_thread_message(self, message):
         if message.channel.id in self.chat_backups:
             if not message.author.bot:
@@ -294,15 +320,17 @@ class RequestCog(commands.Cog):
                     (message.author.display_name, message.content)
                 )
 
-# ==== Anfrage-Menü ====
+# ========== VIEWS & MODALS ==========
+
 class RequestMenuView(discord.ui.View):
-    def __init__(self, cog):
+    def __init__(self, cog, channel):
         super().__init__(timeout=None)
         self.cog = cog
-        self.add_item(RequestTypeDropdown(self.cog))
+        self.channel = channel
+        self.add_item(RequestTypeDropdown(self.cog, self.channel))
 
 class RequestTypeDropdown(discord.ui.Select):
-    def __init__(self, cog):
+    def __init__(self, cog, menu_channel):
         options = [
             discord.SelectOption(label="Custom Anfrage", value="custom", emoji=TAG_CUSTOM["emoji"], description="Individuelle Anfrage erstellen"),
             discord.SelectOption(label="AI Voice Anfrage", value="ai", emoji=TAG_AI["emoji"], description="AI Voice Over Anfrage"),
@@ -313,21 +341,23 @@ class RequestTypeDropdown(discord.ui.Select):
             min_values=1, max_values=1, options=options
         )
         self.cog = cog
+        self.menu_channel = menu_channel
 
     async def callback(self, interaction: Interaction):
         value = self.values[0]
         if value == "custom":
-            await interaction.response.send_modal(CustomRequestModal(self.cog))
+            await interaction.response.send_modal(CustomRequestModal(self.cog, self.menu_channel))
         elif value == "ai":
-            await interaction.response.send_modal(AIRequestModal(self.cog))
+            await interaction.response.send_modal(AIRequestModal(self.cog, self.menu_channel))
         elif value == "wunsch":
-            await interaction.response.send_modal(WunschRequestModal(self.cog))
+            await interaction.response.send_modal(WunschRequestModal(self.cog, self.menu_channel))
 
 # ==== Custom Anfrage Modal ====
 class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
-    def __init__(self, cog):
+    def __init__(self, cog, menu_channel):
         super().__init__()
         self.cog = cog
+        self.menu_channel = menu_channel
 
         self.streamer = discord.ui.TextInput(
             label="Streamer",
@@ -336,8 +366,14 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
         )
         self.fan_tag = discord.ui.TextInput(
             label="Fan-Tag",
-            placeholder="@12hh238712 – Discord Tag eingeben",
+            placeholder="@12hh238712 – Infloww Tag eingeben",
             max_length=32
+        )
+        self.customer_id = discord.ui.TextInput(
+            label="CustomerID (Infloww)",
+            placeholder="ID aus Infloww eintragen (nur für Custom!)",
+            max_length=24,
+            required=False
         )
         self.preis_bezahlt = discord.ui.TextInput(
             label="Preis und bezahlt?",
@@ -357,6 +393,7 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
         )
         self.add_item(self.streamer)
         self.add_item(self.fan_tag)
+        self.add_item(self.customer_id)
         self.add_item(self.preis_bezahlt)
         self.add_item(self.sprache)
         self.add_item(self.anfrage_bis)
@@ -365,17 +402,19 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
         data = {
             "streamer": self.streamer.value,
             "fan_tag": self.fan_tag.value,
+            "customer_id": self.customer_id.value,
             "preis_bezahlt": self.preis_bezahlt.value,
             "sprache": self.sprache.value,
             "anfrage_bis": self.anfrage_bis.value,
         }
-        await self.cog.post_request(interaction, data, "custom")
+        await self.cog.post_request(interaction, data, "custom", menu_channel=self.menu_channel)
 
 # ==== AI Voice Anfrage Modal ====
 class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage erstellen"):
-    def __init__(self, cog):
+    def __init__(self, cog, menu_channel):
         super().__init__()
         self.cog = cog
+        self.menu_channel = menu_channel
         self.streamer = discord.ui.TextInput(
             label="Streamer",
             placeholder="Name des Streamers",
@@ -409,13 +448,14 @@ class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage erstellen"):
             "zeitgrenze": self.zeitgrenze.value,
             "sprache": self.sprache.value
         }
-        await self.cog.post_request(interaction, data, "ai")
+        await self.cog.post_request(interaction, data, "ai", menu_channel=self.menu_channel)
 
 # ==== Content Wunsch Modal ====
 class WunschRequestModal(discord.ui.Modal, title="Content Wunsch Anfrage erstellen"):
-    def __init__(self, cog):
+    def __init__(self, cog, menu_channel):
         super().__init__()
         self.cog = cog
+        self.menu_channel = menu_channel
         self.streamer = discord.ui.TextInput(
             label="Streamer",
             placeholder="Name des Streamers",
@@ -456,7 +496,7 @@ class WunschRequestModal(discord.ui.Modal, title="Content Wunsch Anfrage erstell
             "anfrage": self.anfrage.value,
             "zeitgrenze": self.zeitgrenze.value
         }
-        await self.cog.post_request(interaction, data, "wunsch")
+        await self.cog.post_request(interaction, data, "wunsch", menu_channel=self.menu_channel)
 
 # ==== Thread-View mit Status- und Close-Button ====
 class RequestThreadView(discord.ui.View):
@@ -480,8 +520,9 @@ class StatusEditButton(discord.ui.Button):
         leads = await get_leads()
         reqtype = self.data['type']
         allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"] if reqtype == "ai" else leads["wunsch"]
-        if interaction.user.id not in allowed_leads:
-            return await utils.send_error(interaction, "Nur der zuständige Lead kann den Status ändern!")
+        # NEU: Admins dürfen auch!
+        if interaction.user.id not in allowed_leads and not utils.is_admin(interaction.user):
+            return await utils.send_error(interaction, "Nur der zuständige Lead oder ein Admin kann den Status ändern!")
         await interaction.response.send_message(
             "Wähle den neuen Status:",
             view=StatusDropdownView(self.cog, self.data, self.thread_channel, interaction.user),
@@ -525,8 +566,9 @@ class StatusDropdown(discord.ui.Select):
     async def finish_status_change(self, interaction, new_status, grund):
         nr = self.data.get('nr', 0)
         self.data['status'] = new_status
+        customer_id = self.data.get('customer_id', "")
         new_title = build_thread_title(
-            new_status, self.data['streamer'], self.data['erstellername'], self.data['tag'], self.data['type'], nr
+            new_status, self.data['streamer'], self.data['erstellername'], customer_id if self.data["type"] == "custom" else "", self.data['tag'], nr
         )
         await self.thread_channel.edit(name=new_title)
         embed = build_embed(self.data, status=new_status)
@@ -578,12 +620,12 @@ class CloseRequestButton(discord.ui.Button):
         self.thread_channel = thread_channel
 
     async def callback(self, interaction: Interaction):
-        # Nur Lead oder Ersteller darf schließen!
         leads = await get_leads()
         reqtype = self.data['type']
         allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"] if reqtype == "ai" else leads["wunsch"]
-        if interaction.user.id not in allowed_leads and interaction.user.id != self.data["erstellerid"]:
-            return await utils.send_error(interaction, "Nur der zuständige Lead oder der Anfragesteller darf schließen!")
+        # NEU: Admins dürfen auch!
+        if interaction.user.id not in allowed_leads and interaction.user.id != self.data["erstellerid"] and not utils.is_admin(interaction.user):
+            return await utils.send_error(interaction, "Nur der zuständige Lead, ein Admin oder der Anfragesteller darf schließen!")
         config = await get_request_config()
         done_forum_id = config.get("done_forum")
         if not done_forum_id:
@@ -591,11 +633,9 @@ class CloseRequestButton(discord.ui.Button):
         done_forum = interaction.guild.get_channel(done_forum_id)
         nr = self.data.get('nr', 0)
 
-        # Filter Bot-Systemnachrichten aus dem Verlauf raus
         messages = []
         async for msg in self.thread_channel.history(limit=100, oldest_first=True):
             if msg.author.bot:
-                # Filtere Bot-System-Nachrichten raus:
                 if not any(
                     k in msg.content for k in [
                         "Status geändert von", "Anfrage erstellt", "Backup der Anfrage"
@@ -608,24 +648,17 @@ class CloseRequestButton(discord.ui.Button):
 
         last_status = STATUS_DISPLAY.get(self.data.get('status', 'offen'), "Unbekannt")
         backup_body = f"**Finaler Status:** {last_status}\n\n" + "\n".join(messages)
+        customer_id = self.data.get('customer_id', "")
         new_title = build_thread_title(
             self.data.get('status', 'geschlossen'), self.data['streamer'], self.data['erstellername'],
-            self.data['tag'], self.data['type'], nr
+            customer_id if self.data["type"] == "custom" else "", self.data['tag'], nr
         )
-        # Richtiges Tag-Objekt holen für done-Forum
-        if self.data['type'] == "custom":
-            tag_obj = discord.utils.get(done_forum.available_tags, id=int(TAG_CUSTOM["id"]))
-            applied_tags = [tag_obj] if tag_obj else []
-        elif self.data['type'] == "ai":
-            tag_obj = discord.utils.get(done_forum.available_tags, id=int(TAG_AI["id"]))
-            applied_tags = [tag_obj] if tag_obj else []
-        else:
-            tag_obj = discord.utils.get(done_forum.available_tags, id=int(TAG_WUNSCH["id"]))
-            applied_tags = [tag_obj] if tag_obj else []
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
             content="Backup der Anfrage.",
-            applied_tags=applied_tags
+            applied_tags=[TAG_CUSTOM["id"] if self.data['type'] == "custom"
+                         else TAG_AI["id"] if self.data['type'] == "ai"
+                         else TAG_WUNSCH["id"]]
         )
         closed_channel = closed_thread_with_msg.thread
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
@@ -658,14 +691,15 @@ class LeadActionsDropdown(discord.ui.Select):
         self.lead = lead
 
     async def callback(self, interaction: Interaction):
-        if interaction.user.id != self.lead.id:
-            return await interaction.response.send_message("Nur du als Lead kannst den Status ändern!", ephemeral=True)
+        # NEU: Admins dürfen auch!
+        if interaction.user.id != self.lead.id and not utils.is_admin(interaction.user):
+            return await interaction.response.send_message("Nur du als Lead oder ein Admin kannst den Status ändern!", ephemeral=True)
         new_status = self.values[0]
         if new_status in ("abgelehnt", "uploaded", "done"):
             await interaction.response.send_modal(StatusReasonModal(self.cog, self.data, self.thread_channel, self.lead, new_status))
         else:
             await StatusDropdown(self.cog, self.data, self.thread_channel, self.lead).finish_status_change(interaction, new_status, "")
 
-# ==== Cog Setup ====
+# ==== Setup zum Schluss ====
 async def setup(bot):
     await bot.add_cog(RequestCog(bot))
