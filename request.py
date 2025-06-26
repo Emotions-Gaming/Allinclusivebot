@@ -301,9 +301,30 @@ class RequestCog(commands.Cog):
 
 # ==== Views, Dropdowns, Modal-Classes etc. folgen in Part 3/3! ====
 # ==== FILTER-TAGS als globale Konstanten ====
+# Deine Tags
 TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": 1387599528831615087}
 TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": 1387599571441680505}
 TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": 1387599595667722330}
+
+# Im post_request oder wo du Thread erstellst:
+if reqtype == "custom":
+    tag_id = TAG_CUSTOM["id"]
+elif reqtype == "ai":
+    tag_id = TAG_AI["id"]
+elif reqtype == "wunsch":
+    tag_id = TAG_WUNSCH["id"]
+else:
+    tag_id = None
+
+applied_tags = [tag_id] if tag_id else []
+
+# Und dann so:
+thread_with_message = await forum.create_thread(
+    name=thread_title,
+    content="Neue Anfrage erstellt.",
+    applied_tags=applied_tags,
+)
+
 
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
