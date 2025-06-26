@@ -1,6 +1,4 @@
-﻿# request.py
-
-import discord
+﻿import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -14,10 +12,10 @@ MAX_TITLE_LEN = 80
 MAX_BODY_LEN = 500
 MAX_COMMENT_LEN = 200
 
-# ---- Tag-IDs (bitte echte Foren-Tags eintragen, als STR!)
-TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": "1387599528831615087"}
-TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": "1387599571441680505"}
-TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": "1387599595667722330"}
+# ---- Tag-IDs wie von dir ----
+TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": 1387599528831615087}
+TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": 1387599571441680505}
+TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": 1387599595667722330}
 
 STATUS_COLORS = {
     "offen": discord.Color.blurple(),
@@ -60,7 +58,6 @@ def build_embed(data, status="offen"):
     sprache = f"**Sprache:** {data['sprache']}" if data.get("sprache") else ""
     desc = data.get("desc", "")
 
-    # CUSTOM
     if data["type"] == "custom":
         desc = (
             f"{tagline}\n"
@@ -68,7 +65,6 @@ def build_embed(data, status="offen"):
             f"{sprache}\n"
             f"**Anfrage + Bis Wann?** {data['anfrage_bis']}"
         )
-    # AI
     elif data["type"] == "ai":
         desc = (
             f":information_source: **Nur Mila und Xenia sind für AI Voice Over verfügbar!**\n"
@@ -77,7 +73,6 @@ def build_embed(data, status="offen"):
             f"**Audio Wunsch:** {data['audiowunsch']}\n"
             f"**Bis wann:** {data['zeitgrenze']}"
         )
-    # WUNSCH
     elif data["type"] == "wunsch":
         desc = (
             f"**Typ:** {data['media_typ']}\n"
@@ -85,7 +80,6 @@ def build_embed(data, status="offen"):
             f"**Anfrage:** {data['anfrage']}\n"
             f"**Bis wann:** {data['zeitgrenze']}"
         )
-
     embed = discord.Embed(
         title=title,
         description=f"{desc}\n\n**Status:** {STATUS_DISPLAY[status]}",
@@ -202,37 +196,36 @@ class RequestCog(commands.Cog):
             await save_leads(leads)
         await utils.send_success(interaction, f"{user.mention} wurde als Wunsch-Lead entfernt.")
 
-    # ======= Haupt-Request-Posting (mit Tags) =======
+    # ======= Haupt-Request-Posting (jetzt MIT Tag-Objekten, kein Fehler mehr) =======
     async def post_request(self, interaction, data, reqtype):
         config = await get_request_config()
         forum_id = config.get("active_forum")
         if not forum_id:
             return await utils.send_error(interaction, "Kein aktives Forum konfiguriert.")
-
         forum = interaction.guild.get_channel(forum_id)
         all_threads = forum.threads
         nr = len(all_threads) + 1
         data["nr"] = nr
 
-        # KATEGORIE-TAG wählt nach Typ
+        # ---- Tag-Objekt holen ----
         if reqtype == "custom":
-            applied_tags = [TAG_CUSTOM["id"]]
+            tag_obj = discord.utils.get(forum.available_tags, id=int(TAG_CUSTOM["id"]))
+            applied_tags = [tag_obj] if tag_obj else []
             tag_text = TAG_CUSTOM["name"]
         elif reqtype == "ai":
-            applied_tags = [TAG_AI["id"]]
+            tag_obj = discord.utils.get(forum.available_tags, id=int(TAG_AI["id"]))
+            applied_tags = [tag_obj] if tag_obj else []
             tag_text = TAG_AI["name"]
         else:
-            applied_tags = [TAG_WUNSCH["id"]]
+            tag_obj = discord.utils.get(forum.available_tags, id=int(TAG_WUNSCH["id"]))
+            applied_tags = [tag_obj] if tag_obj else []
             tag_text = TAG_WUNSCH["name"]
-
-        # Alles als String an die API!
-        applied_tags_str = [str(tag) for tag in applied_tags]
 
         thread_title = build_thread_title("offen", data['streamer'], str(interaction.user), tag_text, reqtype, nr)
         thread_with_message = await forum.create_thread(
             name=thread_title,
             content="Neue Anfrage erstellt.",
-            applied_tags=applied_tags_str
+            applied_tags=applied_tags
         )
         channel = thread_with_message.thread
 
@@ -301,8 +294,7 @@ class RequestCog(commands.Cog):
                     (message.author.display_name, message.content)
                 )
 
-# ==== VIEWS & MODALS folgen (Custom, AI, Wunsch, Statuswechsel usw.) ====
-# ==== Anfrage-Menü View ====
+# ==== Anfrage-Menü ====
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
@@ -620,16 +612,20 @@ class CloseRequestButton(discord.ui.Button):
             self.data.get('status', 'geschlossen'), self.data['streamer'], self.data['erstellername'],
             self.data['tag'], self.data['type'], nr
         )
-        # Auch beim Close NUR Strings für applied_tags!
-        backup_tag = (
-            TAG_CUSTOM["id"] if self.data['type'] == "custom"
-            else TAG_AI["id"] if self.data['type'] == "ai"
-            else TAG_WUNSCH["id"]
-        )
+        # Richtiges Tag-Objekt holen für done-Forum
+        if self.data['type'] == "custom":
+            tag_obj = discord.utils.get(done_forum.available_tags, id=int(TAG_CUSTOM["id"]))
+            applied_tags = [tag_obj] if tag_obj else []
+        elif self.data['type'] == "ai":
+            tag_obj = discord.utils.get(done_forum.available_tags, id=int(TAG_AI["id"]))
+            applied_tags = [tag_obj] if tag_obj else []
+        else:
+            tag_obj = discord.utils.get(done_forum.available_tags, id=int(TAG_WUNSCH["id"]))
+            applied_tags = [tag_obj] if tag_obj else []
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
             content="Backup der Anfrage.",
-            applied_tags=[str(backup_tag)]
+            applied_tags=applied_tags
         )
         closed_channel = closed_thread_with_msg.thread
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
@@ -670,6 +666,6 @@ class LeadActionsDropdown(discord.ui.Select):
         else:
             await StatusDropdown(self.cog, self.data, self.thread_channel, self.lead).finish_status_change(interaction, new_status, "")
 
-# ==== Setup zum Schluss ====
+# ==== Cog Setup ====
 async def setup(bot):
     await bot.add_cog(RequestCog(bot))
