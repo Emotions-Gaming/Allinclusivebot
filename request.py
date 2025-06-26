@@ -12,7 +12,7 @@ MAX_TITLE_LEN = 80
 MAX_BODY_LEN = 500
 MAX_COMMENT_LEN = 200
 
-# ---- Tag-IDs (deine echten Foren-Tags eintragen) ----
+# ---- Tag-IDs (echte Foren-Tags eintragen) ----
 TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": 1387599528831615087}
 TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": 1387599571441680505}
 TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": 1387599595667722330}
@@ -215,13 +215,13 @@ class RequestCog(commands.Cog):
 
         # KATEGORIE-TAG wählt nach Typ
         if reqtype == "custom":
-            applied_tags = [str(TAG_CUSTOM["id"])]
+            applied_tags = [TAG_CUSTOM["id"]]
             tag_text = TAG_CUSTOM["name"]
         elif reqtype == "ai":
-            applied_tags = [str(TAG_AI["id"])]
+            applied_tags = [TAG_AI["id"]]
             tag_text = TAG_AI["name"]
         else:
-            applied_tags = [str(TAG_WUNSCH["id"])]
+            applied_tags = [TAG_WUNSCH["id"]]
             tag_text = TAG_WUNSCH["name"]
 
         thread_title = build_thread_title("offen", data['streamer'], str(interaction.user), tag_text, reqtype, nr)
@@ -297,7 +297,7 @@ class RequestCog(commands.Cog):
                     (message.author.display_name, message.content)
                 )
 
-# ==== VIEWS & MODALS folgen (Custom, AI, Wunsch, Statuswechsel usw.) ====
+# ========== Restliche Views, Modals, Buttons, Status-Handling, Backup etc. kommen im nächsten Part ==========
 # ==== Anfrage-Menü View ====
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
@@ -572,7 +572,6 @@ class StatusReasonModal(discord.ui.Modal, title="Grund für den Status"):
         await StatusDropdown(self.cog, self.data, self.thread_channel, self.lead).finish_status_change(
             interaction, self.status, self.reason.value
         )
-
 # ==== Anfrage schließen Button ====
 class CloseRequestButton(discord.ui.Button):
     def __init__(self, cog, data, thread_channel):
@@ -619,9 +618,9 @@ class CloseRequestButton(discord.ui.Button):
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
             content="Backup der Anfrage.",
-            applied_tags=[str(TAG_CUSTOM["id"]) if self.data['type'] == "custom"
-                         else str(TAG_AI["id"]) if self.data['type'] == "ai"
-                         else str(TAG_WUNSCH["id"])]
+            applied_tags=[TAG_CUSTOM["id"]] if self.data['type'] == "custom"
+                         else [TAG_AI["id"]] if self.data['type'] == "ai"
+                         else [TAG_WUNSCH["id"]]
         )
         closed_channel = closed_thread_with_msg.thread
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
