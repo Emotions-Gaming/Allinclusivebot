@@ -1,4 +1,6 @@
-﻿import discord
+﻿# request.py
+
+import discord
 from discord import app_commands, Interaction
 from discord.ext import commands
 import os
@@ -12,12 +14,11 @@ MAX_TITLE_LEN = 80
 MAX_BODY_LEN = 500
 MAX_COMMENT_LEN = 200
 
-# ---- Tag-IDs (deine echten Foren-Tags) ----
-TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": 1387599528831615087}
-TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": 1387599571441680505}
-TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": 1387599595667722330}
+# ---- Tag-IDs (bitte echte Foren-Tags eintragen, als STR!)
+TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": "1387599528831615087"}
+TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": "1387599571441680505"}
+TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": "1387599595667722330"}
 
-# ---- Status
 STATUS_COLORS = {
     "offen": discord.Color.blurple(),
     "angenommen": discord.Color.green(),
@@ -134,7 +135,7 @@ class RequestCog(commands.Cog):
         await channel.send(embed=embed, view=view)
         await utils.send_success(interaction, f"Anfrage-Menü in {channel.mention} gepostet!")
 
-    # ==== LEAD Management ====
+    # ==== Lead-Management ====
     @app_commands.command(name="requestcustomlead", description="Fügt einen Custom-Lead hinzu.")
     @app_commands.guilds(MY_GUILD)
     async def requestcustomlead(self, interaction: Interaction, user: discord.User):
@@ -201,7 +202,7 @@ class RequestCog(commands.Cog):
             await save_leads(leads)
         await utils.send_success(interaction, f"{user.mention} wurde als Wunsch-Lead entfernt.")
 
-    # ======= Haupt-Request-Posting (mit Tag IDs als INT!) =======
+    # ======= Haupt-Request-Posting (mit Tags) =======
     async def post_request(self, interaction, data, reqtype):
         config = await get_request_config()
         forum_id = config.get("active_forum")
@@ -213,7 +214,7 @@ class RequestCog(commands.Cog):
         nr = len(all_threads) + 1
         data["nr"] = nr
 
-        # applied_tags als INT-Liste!
+        # KATEGORIE-TAG wählt nach Typ
         if reqtype == "custom":
             applied_tags = [TAG_CUSTOM["id"]]
             tag_text = TAG_CUSTOM["name"]
@@ -224,11 +225,14 @@ class RequestCog(commands.Cog):
             applied_tags = [TAG_WUNSCH["id"]]
             tag_text = TAG_WUNSCH["name"]
 
+        # Alles als String an die API!
+        applied_tags_str = [str(tag) for tag in applied_tags]
+
         thread_title = build_thread_title("offen", data['streamer'], str(interaction.user), tag_text, reqtype, nr)
         thread_with_message = await forum.create_thread(
             name=thread_title,
             content="Neue Anfrage erstellt.",
-            applied_tags=applied_tags  # <-- INT-Liste!
+            applied_tags=applied_tags_str
         )
         channel = thread_with_message.thread
 
@@ -244,6 +248,7 @@ class RequestCog(commands.Cog):
         await self.send_lead_dm(interaction, data, channel, reqtype)
         await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
 
+    # ==== DM an Lead (wie gehabt) ====
     async def send_lead_dm(self, interaction, data, thread_channel, reqtype):
         leads = await get_leads()
         if reqtype == "custom":
@@ -288,6 +293,7 @@ class RequestCog(commands.Cog):
                 except Exception:
                     pass
 
+    # ====== Nachrichten Backup für später (done-thread) ======
     async def on_thread_message(self, message):
         if message.channel.id in self.chat_backups:
             if not message.author.bot:
@@ -296,7 +302,7 @@ class RequestCog(commands.Cog):
                 )
 
 # ==== VIEWS & MODALS folgen (Custom, AI, Wunsch, Statuswechsel usw.) ====
-
+# ==== Anfrage-Menü View ====
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
@@ -325,10 +331,12 @@ class RequestTypeDropdown(discord.ui.Select):
         elif value == "wunsch":
             await interaction.response.send_modal(WunschRequestModal(self.cog))
 
+# ==== Custom Anfrage Modal ====
 class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
         self.cog = cog
+
         self.streamer = discord.ui.TextInput(
             label="Streamer",
             placeholder="Name des Streamers",
@@ -371,6 +379,7 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
         }
         await self.cog.post_request(interaction, data, "custom")
 
+# ==== AI Voice Anfrage Modal ====
 class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
@@ -410,6 +419,7 @@ class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage erstellen"):
         }
         await self.cog.post_request(interaction, data, "ai")
 
+# ==== Content Wunsch Modal ====
 class WunschRequestModal(discord.ui.Modal, title="Content Wunsch Anfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
@@ -456,6 +466,7 @@ class WunschRequestModal(discord.ui.Modal, title="Content Wunsch Anfrage erstell
         }
         await self.cog.post_request(interaction, data, "wunsch")
 
+# ==== Thread-View mit Status- und Close-Button ====
 class RequestThreadView(discord.ui.View):
     def __init__(self, cog, data, thread_channel):
         super().__init__(timeout=None)
@@ -465,6 +476,7 @@ class RequestThreadView(discord.ui.View):
         self.add_item(StatusEditButton(cog, data, thread_channel))
         self.add_item(CloseRequestButton(cog, data, thread_channel))
 
+# ==== Status Bearbeiten Button ====
 class StatusEditButton(discord.ui.Button):
     def __init__(self, cog, data, thread_channel):
         super().__init__(label="Status bearbeiten", style=discord.ButtonStyle.primary, emoji="✏️")
@@ -484,6 +496,7 @@ class StatusEditButton(discord.ui.Button):
             ephemeral=True
         )
 
+# ==== Status-Dropdown ====
 class StatusDropdownView(discord.ui.View):
     def __init__(self, cog, data, thread_channel, lead):
         super().__init__(timeout=60)
@@ -564,6 +577,7 @@ class StatusReasonModal(discord.ui.Modal, title="Grund für den Status"):
             interaction, self.status, self.reason.value
         )
 
+# ==== Anfrage schließen Button ====
 class CloseRequestButton(discord.ui.Button):
     def __init__(self, cog, data, thread_channel):
         super().__init__(label="Anfrage schließen", style=discord.ButtonStyle.danger, emoji="🔒")
@@ -572,6 +586,7 @@ class CloseRequestButton(discord.ui.Button):
         self.thread_channel = thread_channel
 
     async def callback(self, interaction: Interaction):
+        # Nur Lead oder Ersteller darf schließen!
         leads = await get_leads()
         reqtype = self.data['type']
         allowed_leads = leads["custom"] if reqtype == "custom" else leads["ai"] if reqtype == "ai" else leads["wunsch"]
@@ -584,10 +599,11 @@ class CloseRequestButton(discord.ui.Button):
         done_forum = interaction.guild.get_channel(done_forum_id)
         nr = self.data.get('nr', 0)
 
-        # Backup aller Messages
+        # Filter Bot-Systemnachrichten aus dem Verlauf raus
         messages = []
         async for msg in self.thread_channel.history(limit=100, oldest_first=True):
             if msg.author.bot:
+                # Filtere Bot-System-Nachrichten raus:
                 if not any(
                     k in msg.content for k in [
                         "Status geändert von", "Anfrage erstellt", "Backup der Anfrage"
@@ -604,12 +620,16 @@ class CloseRequestButton(discord.ui.Button):
             self.data.get('status', 'geschlossen'), self.data['streamer'], self.data['erstellername'],
             self.data['tag'], self.data['type'], nr
         )
+        # Auch beim Close NUR Strings für applied_tags!
+        backup_tag = (
+            TAG_CUSTOM["id"] if self.data['type'] == "custom"
+            else TAG_AI["id"] if self.data['type'] == "ai"
+            else TAG_WUNSCH["id"]
+        )
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
             content="Backup der Anfrage.",
-            applied_tags=[TAG_CUSTOM["id"]] if self.data['type'] == "custom"
-                         else [TAG_AI["id"]] if self.data['type'] == "ai"
-                         else [TAG_WUNSCH["id"]]
+            applied_tags=[str(backup_tag)]
         )
         closed_channel = closed_thread_with_msg.thread
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
@@ -618,6 +638,7 @@ class CloseRequestButton(discord.ui.Button):
         await self.thread_channel.edit(archived=True, locked=True)
         await interaction.response.send_message("Anfrage als erledigt verschoben und gesperrt!", ephemeral=True)
 
+# ==== Lead-Actions-Dropdown (DM) ====
 class LeadActionsDropdownView(discord.ui.View):
     def __init__(self, cog, data, thread_channel, lead):
         super().__init__(timeout=None)
