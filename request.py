@@ -12,7 +12,7 @@ MAX_TITLE_LEN = 80
 MAX_BODY_LEN = 500
 MAX_COMMENT_LEN = 200
 
-# ---- Tag-IDs (echte Foren-Tags eintragen) ----
+# ---- Tag-IDs (deine echten Foren-Tags eintragen) ----
 TAG_CUSTOM = {"name": "Custom", "emoji": "🎨", "id": 1387599528831615087}
 TAG_AI     = {"name": "AI Voice", "emoji": "🗣️", "id": 1387599571441680505}
 TAG_WUNSCH = {"name": "Wunsch", "emoji": "💡", "id": 1387599595667722330}
@@ -297,7 +297,7 @@ class RequestCog(commands.Cog):
                     (message.author.display_name, message.content)
                 )
 
-# ========== Restliche Views, Modals, Buttons, Status-Handling, Backup etc. kommen im nächsten Part ==========
+# ==== VIEWS & MODALS folgen (Custom, AI, Wunsch, Statuswechsel usw.) ====
 # ==== Anfrage-Menü View ====
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
@@ -572,6 +572,7 @@ class StatusReasonModal(discord.ui.Modal, title="Grund für den Status"):
         await StatusDropdown(self.cog, self.data, self.thread_channel, self.lead).finish_status_change(
             interaction, self.status, self.reason.value
         )
+
 # ==== Anfrage schließen Button ====
 class CloseRequestButton(discord.ui.Button):
     def __init__(self, cog, data, thread_channel):
@@ -598,7 +599,6 @@ class CloseRequestButton(discord.ui.Button):
         messages = []
         async for msg in self.thread_channel.history(limit=100, oldest_first=True):
             if msg.author.bot:
-                # Filtere Bot-System-Nachrichten raus:
                 if not any(
                     k in msg.content for k in [
                         "Status geändert von", "Anfrage erstellt", "Backup der Anfrage"
@@ -618,9 +618,9 @@ class CloseRequestButton(discord.ui.Button):
         closed_thread_with_msg = await done_forum.create_thread(
             name=new_title,
             content="Backup der Anfrage.",
-            applied_tags=[TAG_CUSTOM["id"]] if self.data['type'] == "custom"
-                         else [TAG_AI["id"]] if self.data['type'] == "ai"
-                         else [TAG_WUNSCH["id"]]
+            applied_tags=[TAG_CUSTOM["id"] if self.data['type'] == "custom"
+                         else TAG_AI["id"] if self.data['type'] == "ai"
+                         else TAG_WUNSCH["id"]]
         )
         closed_channel = closed_thread_with_msg.thread
         embed = build_embed(self.data, status=self.data.get('status', 'geschlossen'))
@@ -664,3 +664,4 @@ class LeadActionsDropdown(discord.ui.Select):
 # ==== Setup zum Schluss ====
 async def setup(bot):
     await bot.add_cog(RequestCog(bot))
+
