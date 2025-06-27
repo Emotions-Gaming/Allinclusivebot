@@ -177,7 +177,7 @@ class WunschRequestModal(discord.ui.Modal, title="Content Wunsch Anfrage erstell
         }
         await self.cog.post_request(interaction, data, "wunsch")
 
-class ScriptRequestModal(discord.ui.Modal, title="Script Anfrage erstellen"):
+class ScriptRequestModal(discord.ui.Modal, title="Sequence Anfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
         self.cog = cog
@@ -243,7 +243,7 @@ class RequestTypeDropdown(discord.ui.Select):
                 label="Content Wunsch", value="wunsch", emoji=TAG_WUNSCH["emoji"], description="Content (Bild/Video/Audio) Wunsch"
             ),
             discord.SelectOption(
-                label="Script Anfrage", value="script", emoji=TAG_SCRIPT["emoji"], description="Script-Anfrage für Voice/Video"
+                label="Sequence Anfrage", value="script", emoji=TAG_SCRIPT["emoji"], description="Sequence-Anfrage erstellen"
             )
         ]
         super().__init__(
@@ -553,7 +553,7 @@ class RequestTypeDropdown(discord.ui.Select):
                 description="Content (Bild/Video/Audio) Wunsch"
             ),
             discord.SelectOption(
-                label="Script Anfrage",
+                label="Sequence Anfrage",
                 value="script",
                 emoji=TAG_SCRIPT["emoji"],
                 description="Script-Anfrage für Voice/Video"
@@ -708,7 +708,7 @@ class WunschRequestModal(discord.ui.Modal, title="Content Wunsch erstellen"):
         await self.cog.post_request(interaction, data, "wunsch")
 
 # ==== Script Modal ====
-class ScriptRequestModal(discord.ui.Modal, title="Script Anfrage erstellen"):
+class ScriptRequestModal(discord.ui.Modal, title="Sequence Anfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
         self.cog = cog
