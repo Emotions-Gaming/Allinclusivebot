@@ -588,7 +588,7 @@ class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
         )
         self.fan_tag = discord.ui.TextInput(
             label="Fan-Tag (Kunden-ID)",
-            placeholder="Fan-ID, Twitch/Discord-Name oder ähnliches",
+            placeholder="@u120277977",
             max_length=40
         )
         self.preis_bezahlt = discord.ui.TextInput(
