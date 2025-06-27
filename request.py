@@ -36,13 +36,10 @@ STATUS_DISPLAY = {
 }
 
 def build_thread_title(status, streamer, ersteller, customerid, typ, nr, scriptname=None):
-    # Custom: mit CustomerID (Fan-Tag)
     if typ == "custom":
         return f"[{status.capitalize()}] - {streamer} - {ersteller} - {customerid} - {TAG_CUSTOM['name']} - #{nr}"
-    # Script: mit Scriptnamen (ohne CustomerID)
     elif typ == "script":
         return f"[{status.capitalize()}] - {streamer} - {ersteller} - {scriptname} - {TAG_SCRIPT['name']} - #{nr}"
-    # Rest: ohne CustomerID/Scriptnamen
     elif typ == "ai":
         return f"[{status.capitalize()}] - {streamer} - {ersteller} - {TAG_AI['name']} - #{nr}"
     elif typ == "wunsch":
@@ -106,6 +103,169 @@ def build_embed(data, status="offen"):
     embed.set_footer(text=f"Typ: {data['type'].capitalize()} • Erstellt von: {data['erstellername']}")
     return embed
 
+# ========== MODALS ==========
+
+class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN)
+        self.fan_tag = discord.ui.TextInput(label="Fan-Tag", max_length=32)
+        self.preis_bezahlt = discord.ui.TextInput(label="Preis und bezahlt?", max_length=40)
+        self.sprache = discord.ui.TextInput(label="Sprache", max_length=20)
+        self.anfrage_bis = discord.ui.TextInput(label="Anfrage + Bis Wann?", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN)
+        self.add_item(self.streamer)
+        self.add_item(self.fan_tag)
+        self.add_item(self.preis_bezahlt)
+        self.add_item(self.sprache)
+        self.add_item(self.anfrage_bis)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "fan_tag": self.fan_tag.value,
+            "preis_bezahlt": self.preis_bezahlt.value,
+            "sprache": self.sprache.value,
+            "anfrage_bis": self.anfrage_bis.value,
+        }
+        await self.cog.post_request(interaction, data, "custom")
+
+class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN)
+        self.sprache = discord.ui.TextInput(label="Sprache", max_length=20)
+        self.audiowunsch = discord.ui.TextInput(label="Audio Wunsch", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN)
+        self.zeitgrenze = discord.ui.TextInput(label="Bis wann?", max_length=40)
+        self.add_item(self.streamer)
+        self.add_item(self.sprache)
+        self.add_item(self.audiowunsch)
+        self.add_item(self.zeitgrenze)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "audiowunsch": self.audiowunsch.value,
+            "zeitgrenze": self.zeitgrenze.value,
+            "sprache": self.sprache.value
+        }
+        await self.cog.post_request(interaction, data, "ai")
+
+class WunschRequestModal(discord.ui.Modal, title="Content Wunsch Anfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(label="Streamer", max_length=MAX_TITLE_LEN)
+        self.media_typ = discord.ui.TextInput(label="Typ", max_length=20)
+        self.sprache = discord.ui.TextInput(label="Sprache", max_length=20)
+        self.anfrage = discord.ui.TextInput(label="Anfrage", style=discord.TextStyle.paragraph, max_length=MAX_BODY_LEN)
+        self.zeitgrenze = discord.ui.TextInput(label="Bis wann?", max_length=40)
+        self.add_item(self.streamer)
+        self.add_item(self.media_typ)
+        self.add_item(self.sprache)
+        self.add_item(self.anfrage)
+        self.add_item(self.zeitgrenze)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "media_typ": self.media_typ.value,
+            "sprache": self.sprache.value,
+            "anfrage": self.anfrage.value,
+            "zeitgrenze": self.zeitgrenze.value
+        }
+        await self.cog.post_request(interaction, data, "wunsch")
+
+class ScriptRequestModal(discord.ui.Modal, title="Script Anfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(
+            label="Streamer",
+            placeholder="Name des Streamers",
+            max_length=MAX_TITLE_LEN
+        )
+        self.scriptname = discord.ui.TextInput(
+            label="Scriptname",
+            placeholder="Name des Scripts",
+            max_length=40
+        )
+        self.sprache = discord.ui.TextInput(
+            label="Sprache",
+            placeholder="Englisch, Deutsch oder Both",
+            max_length=20
+        )
+        self.wünsche = discord.ui.TextInput(
+            label="Script-Wünsche",
+            placeholder="Tageszeiten, Videos, Richtung etc.",
+            style=discord.TextStyle.paragraph,
+            max_length=MAX_BODY_LEN
+        )
+        self.anfrage_bis = discord.ui.TextInput(
+            label="Bis Wann?",
+            placeholder="Bis zum 19.06.2025",
+            max_length=40
+        )
+        self.add_item(self.streamer)
+        self.add_item(self.scriptname)
+        self.add_item(self.sprache)
+        self.add_item(self.wünsche)
+        self.add_item(self.anfrage_bis)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "scriptname": self.scriptname.value,
+            "sprache": self.sprache.value,
+            "wünsche": self.wünsche.value,
+            "anfrage_bis": self.anfrage_bis.value,
+        }
+        await self.cog.post_request(interaction, data, "script")
+
+# ==== Anfrage-Menü mit Script-Option ====
+class RequestMenuView(discord.ui.View):
+    def __init__(self, cog):
+        super().__init__(timeout=None)
+        self.cog = cog
+        self.add_item(RequestTypeDropdown(self.cog))
+
+class RequestTypeDropdown(discord.ui.Select):
+    def __init__(self, cog):
+        options = [
+            discord.SelectOption(
+                label="Custom Anfrage", value="custom", emoji=TAG_CUSTOM["emoji"], description="Individuelle Anfrage erstellen"
+            ),
+            discord.SelectOption(
+                label="AI Voice Anfrage", value="ai", emoji=TAG_AI["emoji"], description="AI Voice Over nur für Mila & Xenia!"
+            ),
+            discord.SelectOption(
+                label="Content Wunsch", value="wunsch", emoji=TAG_WUNSCH["emoji"], description="Content (Bild/Video/Audio) Wunsch"
+            ),
+            discord.SelectOption(
+                label="Script Anfrage", value="script", emoji=TAG_SCRIPT["emoji"], description="Script-Anfrage für Voice/Video"
+            )
+        ]
+        super().__init__(
+            placeholder="Wähle eine Anfrage-Art…",
+            min_values=1, max_values=1, options=options
+        )
+        self.cog = cog
+
+    async def callback(self, interaction: Interaction):
+        value = self.values[0]
+        if value == "custom":
+            await interaction.response.send_modal(CustomRequestModal(self.cog))
+        elif value == "ai":
+            await interaction.response.send_modal(AIRequestModal(self.cog))
+        elif value == "wunsch":
+            await interaction.response.send_modal(WunschRequestModal(self.cog))
+        elif value == "script":
+            await interaction.response.send_modal(ScriptRequestModal(self.cog))
+
+# ----------- ENDE TEIL 1 -----------
+# ==== Haupt-Cog und Commands ====
+
 class RequestCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -132,7 +292,6 @@ class RequestCog(commands.Cog):
         await save_request_config(config)
         await utils.send_success(interaction, f"Done-Forum gesetzt: {channel.mention}")
 
-    # ==== Menü posten ====
     @app_commands.command(name="requestmain", description="Postet das Anfrage-Menü")
     @app_commands.guilds(MY_GUILD)
     async def requestmain(self, interaction: Interaction, channel: discord.TextChannel):
@@ -147,7 +306,7 @@ class RequestCog(commands.Cog):
         await channel.send(embed=embed, view=view)
         await utils.send_success(interaction, f"Anfrage-Menü in {channel.mention} gepostet!")
 
-    # ==== Lead-Management ==== (inkl. Script)
+    # ==== Lead-Management (inkl. Script) ====
     @app_commands.command(name="requestcustomlead", description="Fügt einen Custom-Lead hinzu.")
     @app_commands.guilds(MY_GUILD)
     async def requestcustomlead(self, interaction: Interaction, user: discord.User):
@@ -292,7 +451,6 @@ class RequestCog(commands.Cog):
         self.chat_backups[channel.id] = []
         await self.send_lead_dm(interaction, data, channel, reqtype)
         await utils.send_success(interaction, "Deine Anfrage wurde erstellt!")
-        # Reset Menu-View (falls nötig, z.B. View disablen – alternativ mit Reload)
         if interaction.message:
             try:
                 view = RequestMenuView(self)
@@ -364,7 +522,9 @@ class RequestCog(commands.Cog):
                     (message.author.display_name, message.content)
                 )
 
+# ----------- ENDE TEIL 2 -----------
 # ==== Anfrage-Menü mit Script-Option ====
+
 class RequestMenuView(discord.ui.View):
     def __init__(self, cog):
         super().__init__(timeout=None)
@@ -374,10 +534,30 @@ class RequestMenuView(discord.ui.View):
 class RequestTypeDropdown(discord.ui.Select):
     def __init__(self, cog):
         options = [
-            discord.SelectOption(label="Custom Anfrage", value="custom", emoji=TAG_CUSTOM["emoji"], description="Individuelle Anfrage erstellen"),
-            discord.SelectOption(label="AI Voice Anfrage", value="ai", emoji=TAG_AI["emoji"], description="AI Voice Over Anfrage"),
-            discord.SelectOption(label="Content Wunsch", value="wunsch", emoji=TAG_WUNSCH["emoji"], description="Content (Bild/Video/Audio) Wunsch"),
-            discord.SelectOption(label="Script Anfrage", value="script", emoji=TAG_SCRIPT["emoji"], description="Script-Anfrage für Voice/Video")
+            discord.SelectOption(
+                label="Custom Anfrage",
+                value="custom",
+                emoji=TAG_CUSTOM["emoji"],
+                description="Eigene Wunsch-Anfrage (Voice/Video/sonstiges)"
+            ),
+            discord.SelectOption(
+                label="AI Voice Anfrage",
+                value="ai",
+                emoji=TAG_AI["emoji"],
+                description="AI Voice Over nur für Mila & Xenia!"
+            ),
+            discord.SelectOption(
+                label="Content Wunsch",
+                value="wunsch",
+                emoji=TAG_WUNSCH["emoji"],
+                description="Content (Bild/Video/Audio) Wunsch"
+            ),
+            discord.SelectOption(
+                label="Script Anfrage",
+                value="script",
+                emoji=TAG_SCRIPT["emoji"],
+                description="Script-Anfrage für Voice/Video"
+            )
         ]
         super().__init__(
             placeholder="Wähle eine Anfrage-Art…",
@@ -396,7 +576,138 @@ class RequestTypeDropdown(discord.ui.Select):
         elif value == "script":
             await interaction.response.send_modal(ScriptRequestModal(self.cog))
 
-# ==== Script Anfrage Modal ====
+# ==== Custom Anfrage Modal ====
+class CustomRequestModal(discord.ui.Modal, title="Custom Anfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(
+            label="Streamer",
+            placeholder="Name des Streamers",
+            max_length=MAX_TITLE_LEN
+        )
+        self.fan_tag = discord.ui.TextInput(
+            label="Fan-Tag (Kunden-ID)",
+            placeholder="Fan-ID, Twitch/Discord-Name oder ähnliches",
+            max_length=40
+        )
+        self.preis_bezahlt = discord.ui.TextInput(
+            label="Preis und bezahlt?",
+            placeholder="z. B. 20€ / bezahlt? (Ja/Nein)",
+            max_length=30
+        )
+        self.sprache = discord.ui.TextInput(
+            label="Sprache",
+            placeholder="Deutsch/Englisch",
+            max_length=20
+        )
+        self.anfrage_bis = discord.ui.TextInput(
+            label="Anfrage + Bis Wann?",
+            placeholder="Was genau, Frist (z. B. bis 19.06.2025)",
+            max_length=MAX_BODY_LEN
+        )
+        self.add_item(self.streamer)
+        self.add_item(self.fan_tag)
+        self.add_item(self.preis_bezahlt)
+        self.add_item(self.sprache)
+        self.add_item(self.anfrage_bis)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "fan_tag": self.fan_tag.value,
+            "preis_bezahlt": self.preis_bezahlt.value,
+            "sprache": self.sprache.value,
+            "anfrage_bis": self.anfrage_bis.value,
+        }
+        await self.cog.post_request(interaction, data, "custom")
+
+# ==== AI Voice Modal ====
+class AIRequestModal(discord.ui.Modal, title="AI Voice Anfrage erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(
+            label="Streamer",
+            placeholder="Name des Streamers",
+            max_length=MAX_TITLE_LEN
+        )
+        self.sprache = discord.ui.TextInput(
+            label="Sprache",
+            placeholder="Deutsch, Englisch oder Both",
+            max_length=20
+        )
+        self.audiowunsch = discord.ui.TextInput(
+            label="Audio Wunsch",
+            placeholder="Was soll gesagt werden? (max. 10 Sekunden)",
+            max_length=MAX_BODY_LEN
+        )
+        self.zeitgrenze = discord.ui.TextInput(
+            label="Bis wann?",
+            placeholder="Frist (z. B. bis 19.06.2025)",
+            max_length=40
+        )
+        self.add_item(self.streamer)
+        self.add_item(self.sprache)
+        self.add_item(self.audiowunsch)
+        self.add_item(self.zeitgrenze)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "sprache": self.sprache.value,
+            "audiowunsch": self.audiowunsch.value,
+            "zeitgrenze": self.zeitgrenze.value,
+        }
+        await self.cog.post_request(interaction, data, "ai")
+
+# ==== Wunsch Modal ====
+class WunschRequestModal(discord.ui.Modal, title="Content Wunsch erstellen"):
+    def __init__(self, cog):
+        super().__init__()
+        self.cog = cog
+        self.streamer = discord.ui.TextInput(
+            label="Streamer",
+            placeholder="Name des Streamers",
+            max_length=MAX_TITLE_LEN
+        )
+        self.media_typ = discord.ui.TextInput(
+            label="Typ",
+            placeholder="Bild/Video/Audio",
+            max_length=30
+        )
+        self.sprache = discord.ui.TextInput(
+            label="Sprache",
+            placeholder="Deutsch, Englisch oder Both",
+            max_length=20
+        )
+        self.anfrage = discord.ui.TextInput(
+            label="Anfrage",
+            placeholder="Was soll gemacht werden?",
+            max_length=MAX_BODY_LEN
+        )
+        self.zeitgrenze = discord.ui.TextInput(
+            label="Bis wann?",
+            placeholder="Frist (z. B. bis 19.06.2025)",
+            max_length=40
+        )
+        self.add_item(self.streamer)
+        self.add_item(self.media_typ)
+        self.add_item(self.sprache)
+        self.add_item(self.anfrage)
+        self.add_item(self.zeitgrenze)
+
+    async def on_submit(self, interaction: Interaction):
+        data = {
+            "streamer": self.streamer.value,
+            "media_typ": self.media_typ.value,
+            "sprache": self.sprache.value,
+            "anfrage": self.anfrage.value,
+            "zeitgrenze": self.zeitgrenze.value,
+        }
+        await self.cog.post_request(interaction, data, "wunsch")
+
+# ==== Script Modal ====
 class ScriptRequestModal(discord.ui.Modal, title="Script Anfrage erstellen"):
     def __init__(self, cog):
         super().__init__()
@@ -443,8 +754,6 @@ class ScriptRequestModal(discord.ui.Modal, title="Script Anfrage erstellen"):
             "anfrage_bis": self.anfrage_bis.value,
         }
         await self.cog.post_request(interaction, data, "script")
-
-# ==== (Alle anderen Modal- & View-Klassen bleiben wie gehabt, keine Änderung nötig) ====
 
 # ==== Thread-View mit Status- und Close-Button ====
 class RequestThreadView(discord.ui.View):
@@ -669,3 +978,7 @@ class LeadActionsDropdown(discord.ui.Select):
 # ==== Cog Setup ====
 async def setup(bot):
     await bot.add_cog(RequestCog(bot))
+
+# ENDE SCRIPT
+
+
