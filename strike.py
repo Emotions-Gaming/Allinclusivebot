@@ -91,6 +91,22 @@ class StrikeLogDetailButton(discord.ui.Button):
         )
         await utils.send_ephemeral(interaction, text=text, emoji="🕵️", color=discord.Color.purple())
 
+class PropsLogDetailButton(discord.ui.Button):
+    def __init__(self, idx, entry):
+        label = f"Details"
+        super().__init__(label=label, style=discord.ButtonStyle.gray, custom_id=f"proplogdetail_{idx}")
+        self.entry = entry
+
+    async def callback(self, interaction: Interaction):
+        e = self.entry
+        text = (
+            f"**Prop vergeben von:** {e['from_user']}\n"
+            f"**An:** {e['to_user']}\n"
+            f"**Grund:** {e['beschreibung']}\n"
+            f"**Zeit:** {e['zeit']}"
+        )
+        await utils.send_ephemeral(interaction, text=text, emoji="🌟", color=discord.Color.purple())
+
 class StrikeCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -481,11 +497,13 @@ class StrikeCog(commands.Cog):
             data = await self.get_props_data()
             prop_entry = {
                 "beschreibung": beschreibung,
-                "zeit": datetime.now().strftime("%Y-%m-%d %H:%M")
+                "zeit": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "von": interaction.user.id  # Wer hat props vergeben?
             }
             data.setdefault(str(user.id), []).append(prop_entry)
             await self.save_props_data(data)
             await self.post_props_log(interaction.guild)
+            await self.save_props_log(interaction.guild, interaction.user, user, beschreibung)
             await utils.send_success(modal_interaction, f"{user.mention} hat einen Prop bekommen!")
             try:
                 await user.send(
@@ -524,6 +542,30 @@ class StrikeCog(commands.Cog):
             view.add_item(PropDetailButton(int(uid), props))
             await ch.send(embed=embed, view=view)
 
+    async def save_props_log(self, guild, from_user, to_user, beschreibung):
+        log_channel = await self.get_props_log_channel(guild)
+        if not log_channel:
+            return
+        log_entry = {
+            "from_user": from_user.mention if from_user else "-",
+            "to_user": to_user.mention if to_user else "-",
+            "beschreibung": beschreibung,
+            "zeit": datetime.now().strftime("%Y-%m-%d %H:%M")
+        }
+        view = discord.ui.View()
+        view.add_item(PropsLogDetailButton(0, log_entry))
+        embed = discord.Embed(
+            title="🌟 Prop vergeben",
+            description=(
+                f"{from_user.mention if from_user else '-'} hat {to_user.mention if to_user else '-'} "
+                f"einen Prop vergeben!\n"
+                f"**Grund:** {beschreibung}\n"
+                f"**Zeit:** {log_entry['zeit']}"
+            ),
+            color=discord.Color.purple()
+        )
+        await log_channel.send(embed=embed, view=view)
+
     @app_commands.command(
         name="propview",
         description="Zeigt dir privat deine aktuellen Props an."
@@ -554,6 +596,17 @@ class StrikeCog(commands.Cog):
         await utils.save_json(PROPS_LIST_PATH, channel.id)
         await self.post_props_log(interaction.guild)
         await utils.send_success(interaction, f"Props-Übersicht wurde in {channel.mention} aktualisiert.")
+
+    @app_commands.command(
+        name="propslog",
+        description="Setzt den Channel für das Props-Log (nur Admins)."
+    )
+    @app_commands.guilds(GUILD_ID)
+    async def propslog(self, interaction: Interaction, channel: discord.TextChannel):
+        if not utils.is_admin(interaction.user):
+            return await utils.send_permission_denied(interaction)
+        await utils.save_json(PROPS_LOG_PATH, channel.id)
+        await utils.send_success(interaction, f"Props-Log-Channel gesetzt: {channel.mention}")
 
     @app_commands.command(
         name="propsremove",
