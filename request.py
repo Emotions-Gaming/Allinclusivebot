@@ -556,7 +556,7 @@ class RequestTypeDropdown(discord.ui.Select):
                 label="Sequence Anfrage",
                 value="script",
                 emoji=TAG_SCRIPT["emoji"],
-                description="Script-Anfrage für Voice/Video"
+                description="Script-Anfrage erstellen"
             )
         ]
         super().__init__(
